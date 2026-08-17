@@ -1,0 +1,89 @@
+services:
+  frontend:
+    build:
+      context: ./apps/web
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-3001}:3000"
+    logging:
+      options: { max-size: "10m", max-file: "3" }
+    depends_on:
+      api:
+        condition: service_healthy
+
+  api:
+    build:
+      context: ./apps/api
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://express:change-me@postgres:5432/express_intelligence}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3001}
+      STORAGE_ROOT: ${STORAGE_ROOT:-/data/source-files}
+    volumes:
+      - "${HOST_DATA_ROOT:-D:/Log Files/data}/source-files:/data/source-files"
+    ports:
+      - "127.0.0.1:8000:8000"
+    logging:
+      options: { max-size: "10m", max-file: "3" }
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  worker:
+    build:
+      context: ./apps/api
+    command: ["python", "-m", "app.worker"]
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://express:change-me@postgres:5432/express_intelligence}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      STORAGE_ROOT: ${STORAGE_ROOT:-/data/source-files}
+    volumes:
+      - "${HOST_DATA_ROOT:-D:/Log Files/data}/source-files:/data/source-files"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    logging:
+      options: { max-size: "10m", max-file: "3" }
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-express_intelligence}
+      POSTGRES_USER: ${POSTGRES_USER:-express}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-express} -d ${POSTGRES_DB:-express_intelligence}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    logging:
+      options: { max-size: "10m", max-file: "3" }
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    logging:
+      options: { max-size: "10m", max-file: "3" }
+
+volumes:
+  postgres-data:
+  redis-data:

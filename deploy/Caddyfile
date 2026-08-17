@@ -1,0 +1,44 @@
+{
+    email {$ACME_EMAIL}
+    admin off
+}
+
+{$APP_DOMAIN} {
+    encode zstd gzip
+
+    basic_auth {
+        import /run/secrets/caddy-users
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "no-referrer"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        -Server
+    }
+
+    @api path /api/* /docs* /openapi.json /redoc*
+    handle @api {
+        reverse_proxy api:8000 {
+            header_up X-Authenticated-User {http.auth.user.id}
+        }
+    }
+
+    handle {
+        reverse_proxy frontend:3000
+    }
+
+    request_body {
+        max_size 70MB
+    }
+
+    log {
+        output file /var/log/caddy/access.json {
+            roll_size 100MB
+            roll_keep 10
+        }
+        format json
+    }
+}
