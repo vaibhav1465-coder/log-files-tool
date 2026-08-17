@@ -12,7 +12,10 @@ Required addresses:
 - UI: the protected Vercel deployment URL
 - API: an HTTPS backend URL such as `https://logs-api.example.com`
 
-Set `NEXT_PUBLIC_API_URL` in Vercel to the HTTPS API address. Add the Vercel
+Set `NEXT_PUBLIC_API_URL` in Vercel to the HTTPS API address when a shared
+backend is available. If it is omitted, the deployment runs in safe team-launcher
+mode and displays the Docker, storage, and local startup instructions instead of
+showing broken API errors. Add the Vercel
 deployment URL to backend `ALLOWED_ORIGINS` and the API hostname to
 `TRUSTED_HOSTS`. Never place a database password, Redis password, API secret,
 or service-account key in a `NEXT_PUBLIC_*` variable.
@@ -31,8 +34,9 @@ or service-account key in a `NEXT_PUBLIC_*` variable.
 ## Vercel
 
 1. Import the private GitHub repository and set Root Directory to `apps/web`.
-2. Set `NEXT_PUBLIC_API_URL` to the secured backend URL for Production and
-   Preview.
+2. For a shared deployment, set `NEXT_PUBLIC_API_URL` to the secured backend URL
+   for Production and Preview. For team-launcher mode, do not create this
+   variable.
 3. Enable Vercel Authentication under Deployment Protection and add only the
    approved team members. On a free Hobby account, share the protected preview
    deployment—not the unprotected production domain.

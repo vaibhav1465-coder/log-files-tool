@@ -3,6 +3,7 @@ import AnalysisLibrary from "./analysis-library";
 import AnalysisResults from "./analysis-results";
 import GscDashboard from "./gsc-dashboard";
 import AdminOperations from "./admin-operations";
+import BackendGate from "./backend-gate";
 
 const modules = [
   { title: "New analysis", detail: "Resumable CDN and origin log intake with evidence checks", state: "Active" },
@@ -34,7 +35,7 @@ export default function Home() {
             <h1>Log intelligence, grounded in evidence.</h1>
             <p className="lead">No uploaded evidence means no metric, conclusion or recommendation.</p>
           </div>
-          <div className="status"><i /> Analysis services active</div>
+          <div className="status"><i /> Secure team launcher</div>
         </header>
 
         <div className="notice">
@@ -65,11 +66,13 @@ export default function Home() {
             <div><dt>Invalid status</dt><dd>Rejected outside 100–599</dd></div>
           </dl>
         </section>
-        <NewAnalysis />
-        <AnalysisLibrary />
-        <AnalysisResults />
-        <GscDashboard />
-        <AdminOperations />
+        <BackendGate>
+          <NewAnalysis />
+          <AnalysisLibrary />
+          <AnalysisResults />
+          <GscDashboard />
+          <AdminOperations />
+        </BackendGate>
       </section>
     </main>
   );

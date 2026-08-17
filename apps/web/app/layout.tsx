@@ -3,7 +3,7 @@ import "./styles.css";
 
 export const metadata: Metadata = {
   title: "Express Intelligence OS",
-  description: "Evidence-first log intelligence for Express publications",
+  description: "Private, evidence-first log intelligence and team setup launcher for Express publications",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
