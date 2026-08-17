@@ -22,11 +22,11 @@ importers:
         specifier: 24.2.1
         version: 24.2.1
       '@types/react':
-        specifier: 19.1.10
-        version: 19.1.10
+        specifier: 19.2.18
+        version: 19.2.18
       '@types/react-dom':
         specifier: 19.1.7
-        version: 19.1.7(@types/react@19.1.10)
+        version: 19.1.7(@types/react@19.2.18)
       typescript:
         specifier: 5.9.2
         version: 5.9.2
@@ -264,8 +264,8 @@ packages:
     peerDependencies:
       '@types/react': ^19.0.0
 
-  '@types/react@19.1.10':
-    resolution: {integrity: sha512-EhBeSYX0Y6ye8pNebpKrwFJq7BoQ8J5SO6NlvNwwHjSj6adXJViPQrKlsyPw7hLBLvckEMO1yxeGdR82YBBlDg==}
+  '@types/react@19.2.18':
+    resolution: {integrity: sha512-AnzbBERsrLKtk2XSfTbYRLjQPdy116Sty4q+T+Bp3IC4l6jNBvreVPAHmpq9qhXQM7CXZPjLVmGMw9sy+hxQ3w==}
 
   baseline-browser-mapping@2.11.13:
     resolution: {integrity: sha512-k9HNuUVMlqVjQ9UHzfPjIqiDbWw7WqT1AoT7GL8VwvF3r0ZfArtgiSPAlmupyNquNgOJHTuH4CKYf8ttMTWBTQ==}
@@ -520,11 +520,11 @@ snapshots:
     dependencies:
       undici-types: 7.10.0
 
-  '@types/react-dom@19.1.7(@types/react@19.1.10)':
+  '@types/react-dom@19.1.7(@types/react@19.2.18)':
     dependencies:
-      '@types/react': 19.1.10
+      '@types/react': 19.2.18
 
-  '@types/react@19.1.10':
+  '@types/react@19.2.18':
     dependencies:
       csstype: 3.2.3
 
