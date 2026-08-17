@@ -1,4 +1,4 @@
-# Private GitHub and Vercel release
+# GitHub and protected Vercel release
 
 ## Architecture
 
@@ -19,7 +19,8 @@ or service-account key in a `NEXT_PUBLIC_*` variable.
 
 ## GitHub
 
-1. Create a **private** repository.
+1. A public source repository is supported because runtime data and secrets are
+   excluded. Use a private repository if company policy requires it.
 2. Push only the tracked source. The repository exclusions prevent raw logs,
    ZIPs, `.env` files, database data, backups, secrets, and the PRD from being
    committed.

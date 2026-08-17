@@ -9,7 +9,8 @@ never attach production logs or credentials.
 
 ## Deployment requirements
 
-- Keep the GitHub repository private.
+- The source repository may be public, but production data and configuration
+  must remain outside Git. Public source access never grants application access.
 - Never commit `.env`, `deploy/secrets`, database dumps, source logs, or GSC keys.
 - Protect the Vercel deployment with Vercel Authentication and allow only
   approved team members.
