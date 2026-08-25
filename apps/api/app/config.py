@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     upload_rate_limit_per_minute: int = 120
     trusted_hosts: str = "localhost,127.0.0.1,testserver"
     db_pool_size: int = 20
+    processing_progress_interval_lines: int = 100_000
+    processing_sqlite_batch_rows: int = 5_000
+    processing_sqlite_cache_mib: int = 64
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

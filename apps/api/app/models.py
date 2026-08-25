@@ -58,6 +58,10 @@ class RunSummary(BaseModel):
     publication: str
     source_type: Literal["cdn", "origin"]
     status: str
+    analysis_limit_bytes: int | None = None
+    eta_low_seconds: int | None = None
+    eta_likely_seconds: int | None = None
+    eta_high_seconds: int | None = None
     phase: str
     progress_percent: float | None
     evidence_state: EvidenceState
@@ -121,6 +125,7 @@ class UploadSessionCreate(BaseModel):
     source_type: Literal["cdn", "origin"]
     filename: str
     size_bytes: int = Field(gt=0)
+    analysis_limit_bytes: int | None = Field(default=None, gt=0)
 
 
 class UploadSession(BaseModel):
@@ -130,3 +135,7 @@ class UploadSession(BaseModel):
     expected_size: int
     upload_offset: int
     status: str
+    analysis_limit_bytes: int | None = None
+    eta_low_seconds: int | None = None
+    eta_likely_seconds: int | None = None
+    eta_high_seconds: int | None = None

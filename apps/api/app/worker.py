@@ -1,4 +1,5 @@
 import json
+import shutil
 import time
 from datetime import date, timedelta
 from pathlib import Path
@@ -21,12 +22,31 @@ def update_run(run_id: str, **values) -> None:
 
 
 def process_run(run_id: str, heartbeat=lambda: None) -> None:
-    update_run(run_id, status="processing", phase="streaming_parse", progress_percent=None)
+    settings = get_settings()
     with connection() as conn:
-        files = conn.execute("SELECT * FROM source_files WHERE run_id=%s ORDER BY created_at", (run_id,)).fetchall()
+        run = conn.execute("SELECT status,analysis_limit_bytes FROM analysis_runs WHERE id=%s FOR UPDATE", (run_id,)).fetchone()
+        if not run or run["status"] in {"completed", "cancelled"}:
+            return
+        files = conn.execute("SELECT * FROM source_files WHERE run_id=%s AND upload_complete ORDER BY created_at", (run_id,)).fetchall()
+        if not files:
+            raise RuntimeError("Run has no completed source file")
+        # SQLite is the staging store. Reset before retry for idempotency.
+        conn.execute("DELETE FROM status_aggregates WHERE run_id=%s", (run_id,))
+        conn.execute("DELETE FROM url_aggregates WHERE run_id=%s", (run_id,))
+        conn.execute("UPDATE analysis_runs SET status='processing',phase='streaming_parse',progress_percent=NULL,processed_lines=0,accepted_lines=0,rejected_lines=0,started_at=COALESCE(started_at,NOW()),completed_at=NULL,error_code=NULL,error_message=NULL WHERE id=%s", (run_id,))
     total_processed = total_accepted = total_rejected = 0
     all_status: dict[int, dict] = {}
     try:
+        scratch_root = Path(files[0]["stored_path"]).parent
+
+        def guard_resources() -> None:
+            free = shutil.disk_usage(scratch_root).free
+            if free < settings.storage_reserve_bytes:
+                raise OSError(f"Processing stopped safely: {free} bytes free is below the {settings.storage_reserve_bytes} byte reserve")
+            heartbeat()
+
+        guard_resources()
+
         def store_url_batch(rows: list[dict]) -> None:
             with connection() as conn:
                 with conn.cursor() as cursor:
@@ -37,11 +57,16 @@ def process_run(run_id: str, heartbeat=lambda: None) -> None:
 
         for source in files:
             with Path(source["stored_path"]).open("rb") as stream:
-                lines, _ = iter_analysis_lines(stream, source["original_name"])
+                lines, _ = iter_analysis_lines(stream, source["original_name"], max_bytes=run["analysis_limit_bytes"], source_size_bytes=source["size_bytes"])
                 def progress(count: int) -> None:
                     update_run(run_id, processed_lines=total_processed + count)
-                    heartbeat()
-                summary = aggregate_lines(lines, progress, store_url_batch, Path(source["stored_path"]).parent)
+                summary = aggregate_lines(
+                    lines, progress, store_url_batch, scratch_root,
+                    resource_guard=guard_resources,
+                    progress_interval=settings.processing_progress_interval_lines,
+                    sink_batch_rows=settings.processing_sqlite_batch_rows,
+                    sqlite_cache_mib=settings.processing_sqlite_cache_mib,
+                )
             total_processed += summary.processed_lines
             total_accepted += summary.accepted_lines
             total_rejected += summary.rejected_lines
@@ -119,7 +144,9 @@ def main() -> None:
             continue
         message_id, fields = messages[0]
         job = json.loads(fields["payload"])
-        lock_key = f"express:job-lock:{message_id}"
+        # Lock by logical target so duplicate messages cannot run concurrently.
+        target = job.get("run_id") or job.get("property_id") or job.get("inspection_id") or message_id
+        lock_key = f"express:job-lock:{job.get('type', 'analysis')}:{target}"
         if not redis.set(lock_key, consumer, nx=True, ex=900):
             continue
         try:

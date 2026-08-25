@@ -143,3 +143,10 @@ CREATE TABLE IF NOT EXISTS audit_events (
     detail JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS analysis_limit_bytes BIGINT;
+ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS eta_low_seconds INTEGER;
+ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS eta_likely_seconds INTEGER;
+ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS eta_high_seconds INTEGER;
+ALTER TABLE analysis_runs DROP CONSTRAINT IF EXISTS analysis_limit_positive;
+ALTER TABLE analysis_runs ADD CONSTRAINT analysis_limit_positive CHECK (analysis_limit_bytes IS NULL OR analysis_limit_bytes > 0);

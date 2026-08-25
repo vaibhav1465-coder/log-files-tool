@@ -15,6 +15,7 @@ from .config import get_settings
 from .intake import MAX_FILES_PER_BATCH, SAMPLE_LINES, IntakeFailure, iter_preflight_lines
 from .db import connection, initialize_database
 from .exports import csv_lines
+from .estimation import estimate_seconds, observed_throughput
 from .models import BatchPreflightResponse, CrawlMetrics, FilePreflightResult, GscPropertyCreate, HealthResponse, InspectionRequest, RunDetail, RunMetricsResponse, RunSummary, UploadSession, UploadSessionCreate, UrlEvidencePage
 from .parser import preflight
 from .storage import ensure_capacity, finalize_upload, store_upload, upload_target
@@ -57,6 +58,9 @@ def create_upload_session(payload: UploadSessionCreate) -> UploadSession:
         raise HTTPException(status_code=422, detail="filename is required")
     if payload.size_bytes > settings.max_file_bytes:
         raise HTTPException(status_code=413, detail=f"Maximum source size is {settings.max_file_bytes} bytes")
+    analysis_limit = payload.analysis_limit_bytes or payload.size_bytes
+    if analysis_limit > payload.size_bytes:
+        raise HTTPException(status_code=422, detail="analysis_limit_bytes cannot exceed size_bytes")
     try:
         ensure_capacity(payload.size_bytes)
     except OSError as exc:
@@ -71,15 +75,16 @@ def create_upload_session(payload: UploadSessionCreate) -> UploadSession:
         active = conn.execute("SELECT id FROM analysis_runs WHERE status='uploading' ORDER BY created_at").fetchall()
         if len(active) >= settings.max_active_uploads:
             raise HTTPException(status_code=409, detail=f"Upload capacity reached ({settings.max_active_uploads} active); retry later")
-        conn.execute("INSERT INTO analysis_runs (id,publication,source_type,status,phase,progress_percent) VALUES (%s,%s,%s,'uploading','upload',0)", (run_id, payload.publication.strip(), payload.source_type))
+        estimate = estimate_seconds(payload.source_type, analysis_limit, observed_throughput(conn, payload.source_type))
+        conn.execute("INSERT INTO analysis_runs (id,publication,source_type,status,phase,progress_percent,analysis_limit_bytes,eta_low_seconds,eta_likely_seconds,eta_high_seconds) VALUES (%s,%s,%s,'uploading','upload',0,%s,%s,%s,%s)", (run_id, payload.publication.strip(), payload.source_type, analysis_limit, estimate.low_seconds, estimate.likely_seconds, estimate.high_seconds))
         conn.execute("INSERT INTO source_files (id,run_id,original_name,stored_path,size_bytes,sha256,source_type,upload_offset,expected_size,upload_complete) VALUES (%s,%s,%s,%s,0,'',%s,0,%s,FALSE)", (file_id, run_id, filename, str(target), payload.source_type, payload.size_bytes))
-    return UploadSession(run_id=str(run_id), file_id=str(file_id), filename=filename, expected_size=payload.size_bytes, upload_offset=0, status="uploading")
+    return UploadSession(run_id=str(run_id), file_id=str(file_id), filename=filename, expected_size=payload.size_bytes, upload_offset=0, status="uploading", analysis_limit_bytes=analysis_limit, eta_low_seconds=estimate.low_seconds, eta_likely_seconds=estimate.likely_seconds, eta_high_seconds=estimate.high_seconds)
 
 
 @app.get("/api/v1/uploads/{run_id}", response_model=UploadSession)
 def get_upload_session(run_id: str) -> UploadSession:
     with connection() as conn:
-        row = conn.execute("SELECT r.id run_id,f.id file_id,f.original_name filename,f.expected_size,f.upload_offset,r.status FROM analysis_runs r JOIN source_files f ON f.run_id=r.id WHERE r.id=%s", (run_id,)).fetchone()
+        row = conn.execute("SELECT r.id run_id,f.id file_id,f.original_name filename,f.expected_size,f.upload_offset,r.status,r.analysis_limit_bytes,r.eta_low_seconds,r.eta_likely_seconds,r.eta_high_seconds FROM analysis_runs r JOIN source_files f ON f.run_id=r.id WHERE r.id=%s", (run_id,)).fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Upload session not found")
     return UploadSession(**row)
@@ -91,7 +96,7 @@ async def upload_chunk(run_id: str, request: Request, upload_offset: int = Heade
     if declared_length > settings.max_chunk_bytes:
         raise HTTPException(status_code=413, detail=f"Chunk limit is {settings.max_chunk_bytes} bytes")
     with connection() as conn:
-        row = conn.execute("SELECT r.status,f.* FROM analysis_runs r JOIN source_files f ON f.run_id=r.id WHERE r.id=%s FOR UPDATE OF f", (run_id,)).fetchone()
+        row = conn.execute("SELECT r.status,r.analysis_limit_bytes,r.eta_low_seconds,r.eta_likely_seconds,r.eta_high_seconds,f.* FROM analysis_runs r JOIN source_files f ON f.run_id=r.id WHERE r.id=%s FOR UPDATE OF f", (run_id,)).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Upload session not found")
         if row["status"] != "uploading" or row["upload_complete"]:
@@ -114,7 +119,7 @@ async def upload_chunk(run_id: str, request: Request, upload_offset: int = Heade
         percent = round(next_offset / row["expected_size"] * 100, 2)
         conn.execute("UPDATE source_files SET upload_offset=%s,size_bytes=%s,upload_updated_at=NOW() WHERE id=%s", (next_offset, next_offset, row["id"]))
         conn.execute("UPDATE analysis_runs SET progress_percent=%s WHERE id=%s", (percent, run_id))
-    return UploadSession(run_id=run_id, file_id=str(row["id"]), filename=row["original_name"], expected_size=row["expected_size"], upload_offset=next_offset, status="uploading")
+    return UploadSession(run_id=run_id, file_id=str(row["id"]), filename=row["original_name"], expected_size=row["expected_size"], upload_offset=next_offset, status="uploading", analysis_limit_bytes=row["analysis_limit_bytes"], eta_low_seconds=row["eta_low_seconds"], eta_likely_seconds=row["eta_likely_seconds"], eta_high_seconds=row["eta_high_seconds"])
 
 
 def _remove_partial_upload(stored_path: str) -> None:
@@ -131,7 +136,7 @@ def _remove_partial_upload(stored_path: str) -> None:
 @app.get("/api/v1/active-upload", response_model=UploadSession | None)
 def get_active_upload() -> UploadSession | None:
     with connection() as conn:
-        row = conn.execute("SELECT r.id run_id,f.id file_id,f.original_name filename,f.expected_size,f.upload_offset,r.status FROM analysis_runs r JOIN source_files f ON f.run_id=r.id WHERE r.status='uploading' ORDER BY r.created_at LIMIT 1").fetchone()
+        row = conn.execute("SELECT r.id run_id,f.id file_id,f.original_name filename,f.expected_size,f.upload_offset,r.status,r.analysis_limit_bytes,r.eta_low_seconds,r.eta_likely_seconds,r.eta_high_seconds FROM analysis_runs r JOIN source_files f ON f.run_id=r.id WHERE r.status='uploading' ORDER BY r.created_at LIMIT 1").fetchone()
     return UploadSession(**row) if row else None
 
 

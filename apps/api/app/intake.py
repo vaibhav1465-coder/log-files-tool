@@ -23,10 +23,16 @@ def _safe_entry_name(name: str) -> bool:
     return not path.is_absolute() and ".." not in path.parts
 
 
-def _decoded_lines(stream: BinaryIO) -> Iterator[str]:
+def _decoded_lines(stream: BinaryIO, max_bytes: int | None = None) -> Iterator[str]:
     wrapper = io.TextIOWrapper(stream, encoding="utf-8", errors="replace", newline="")
+    consumed = 0
     try:
-        yield from wrapper
+        for line in wrapper:
+            line_bytes = len(line.encode("utf-8", errors="replace"))
+            if max_bytes is not None and consumed + line_bytes > max_bytes:
+                return
+            consumed += line_bytes
+            yield line
     finally:
         wrapper.detach()
 
@@ -82,10 +88,10 @@ def iter_preflight_lines(file: BinaryIO, filename: str) -> tuple[Iterator[str], 
     return generate(), len(entries)
 
 
-def iter_analysis_lines(file: BinaryIO, filename: str) -> tuple[Iterator[str], int]:
+def iter_analysis_lines(file: BinaryIO, filename: str, max_bytes: int | None = None, source_size_bytes: int | None = None) -> tuple[Iterator[str], int]:
     lower = filename.lower()
     if not lower.endswith(".zip"):
-        return _decoded_lines(file), 1
+        return _decoded_lines(file, max_bytes), 1
 
     try:
         archive = ZipFile(file)
@@ -106,11 +112,21 @@ def iter_analysis_lines(file: BinaryIO, filename: str) -> tuple[Iterator[str], i
             archive.close()
             raise IntakeFailure("ARCHIVE_RATIO_REJECTED", "Archive compression ratio exceeds the safety limit.")
 
+    compressed_total = sum(max(entry.compress_size, 1) for entry in entries)
+    uncompressed_total = sum(entry.file_size for entry in entries)
+    expanded_limit = None if max_bytes is None else min(uncompressed_total, max_bytes * uncompressed_total // max(source_size_bytes or compressed_total, 1))
+
     def generate() -> Iterator[str]:
+        consumed = 0
         try:
             for entry in entries:
+                remaining = None if expanded_limit is None else max(0, expanded_limit - consumed)
+                if remaining == 0:
+                    return
                 with archive.open(entry) as stream:
-                    yield from _decoded_lines(stream)
+                    for line in _decoded_lines(stream, remaining):
+                        consumed += len(line.encode("utf-8", errors="replace"))
+                        yield line
         finally:
             archive.close()
 

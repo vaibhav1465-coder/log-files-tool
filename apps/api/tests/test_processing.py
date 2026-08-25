@@ -32,6 +32,20 @@ class ProcessingTests(unittest.TestCase):
         self.assertEqual(story["googlebot_first_seen"], "2026-02-18T09:56:28+00:00")
         self.assertEqual(story["googlebot_last_seen"], "2026-02-18T10:56:28+00:00")
 
+    def test_resource_guard_and_progress_are_periodic_and_bounded(self):
+        progress = []
+        guards = []
+        summary = aggregate_lines(
+            [cdn(f"/story/{index}", 200) for index in range(5)],
+            progress.append,
+            resource_guard=lambda: guards.append(True),
+            progress_interval=2,
+            sink_batch_rows=1,
+            sqlite_cache_mib=8,
+        )
+        self.assertEqual(summary.processed_lines, 5)
+        self.assertEqual(progress, [2, 4])
+        self.assertEqual(len(guards), 2)
 
 if __name__ == "__main__":
     unittest.main()

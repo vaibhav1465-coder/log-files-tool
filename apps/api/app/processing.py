@@ -42,6 +42,10 @@ def aggregate_lines(
     progress: Callable[[int], None] | None = None,
     url_sink: Callable[[list[dict]], None] | None = None,
     scratch_directory: Path | None = None,
+    resource_guard: Callable[[], None] | None = None,
+    progress_interval: int = 10_000,
+    sink_batch_rows: int = 2_000,
+    sqlite_cache_mib: int = 64,
 ) -> ProcessingSummary:
     processed = accepted = 0
     profile = "unknown"
@@ -50,7 +54,10 @@ def aggregate_lines(
     temp.close()
     db_path = Path(temp.name)
     conn = sqlite3.connect(db_path)
-    conn.execute("PRAGMA journal_mode=WAL")
+    # Bound memory and keep scratch state to one primary file for huge runs.
+    conn.execute("PRAGMA journal_mode=DELETE")
+    conn.execute("PRAGMA temp_store=FILE")
+    conn.execute(f"PRAGMA cache_size=-{max(8, sqlite_cache_mib) * 1024}")
     conn.execute("CREATE TABLE urls (url TEXT, status INTEGER, requests INTEGER, first_seen TEXT, last_seen TEXT, bytes INTEGER, googlebot INTEGER, googlebot_first TEXT, googlebot_last TEXT, PRIMARY KEY(url,status))")
     try:
         for line in lines:
@@ -72,15 +79,17 @@ def aggregate_lines(
                 "INSERT INTO urls VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(url,status) DO UPDATE SET requests=requests+1, first_seen=MIN(first_seen,excluded.first_seen), last_seen=MAX(last_seen,excluded.last_seen), bytes=COALESCE(bytes,0)+COALESCE(excluded.bytes,0), googlebot=googlebot+excluded.googlebot, googlebot_first=CASE WHEN excluded.googlebot_first IS NULL THEN googlebot_first WHEN googlebot_first IS NULL THEN excluded.googlebot_first ELSE MIN(googlebot_first,excluded.googlebot_first) END, googlebot_last=CASE WHEN excluded.googlebot_last IS NULL THEN googlebot_last WHEN googlebot_last IS NULL THEN excluded.googlebot_last ELSE MAX(googlebot_last,excluded.googlebot_last) END",
                 (normalized, row.status, 1, row.timestamp.isoformat(), row.timestamp.isoformat(), row.response_bytes, is_googlebot, bot_time, bot_time),
             )
-            if processed % 10_000 == 0:
+            if processed % max(1, progress_interval) == 0:
                 conn.commit()
                 if progress:
                     progress(processed)
+                if resource_guard:
+                    resource_guard()
         conn.commit()
         columns = ("normalized_url", "status_code", "request_count", "first_seen", "last_seen", "response_bytes", "googlebot_request_count", "googlebot_first_seen", "googlebot_last_seen")
         cursor = conn.execute("SELECT url,status,requests,first_seen,last_seen,bytes,googlebot,googlebot_first,googlebot_last FROM urls")
         url_rows: list[dict] = []
-        while batch := cursor.fetchmany(2_000):
+        while batch := cursor.fetchmany(max(1, sink_batch_rows)):
             mapped = [dict(zip(columns, row)) for row in batch]
             if url_sink:
                 url_sink(mapped)
@@ -91,3 +100,4 @@ def aggregate_lines(
     finally:
         conn.close()
         db_path.unlink(missing_ok=True)
+        db_path.with_name(db_path.name + "-journal").unlink(missing_ok=True)
