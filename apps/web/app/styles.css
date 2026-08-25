@@ -202,3 +202,26 @@ legend { font-family:Georgia, serif; font-size:21px; margin-bottom:14px; }
 .estimateCard span,.estimateCard small { color:var(--muted); }
 .estimateCard p { margin:5px 0; }
 @media(max-width:420px){.scopeChoices{display:grid;grid-template-columns:1fr 1fr}.scopeChoices button{width:100%}.customScope{max-width:none}}
+
+/* Team launcher: installation, readiness and daily operations */
+.requirementGrid a { margin-top:auto; color:var(--ink); font-weight:bold; font-size:13px; text-underline-offset:3px; }
+.readinessBox { margin-top:28px; display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); border:1px solid var(--line); }
+.readinessBox>div { padding:18px; display:grid; gap:7px; border-left:1px solid var(--line); }
+.readinessBox>div:first-child { border-left:0; }
+.readinessBox span { color:var(--muted); font-size:12px; line-height:1.45; }
+.readinessBox code { overflow-wrap:anywhere; }
+.dailyOperations,.alternatives { margin-top:30px; }
+.operationGrid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; }
+.operationGrid article { min-height:220px; }
+.operationGrid h3 { margin:0 0 10px; font:normal 23px Georgia,serif; }
+.operationGrid code { width:100%; margin-top:8px; padding:9px; background:#171819; color:white; overflow-wrap:anywhere; font-size:12px; }
+.operationGrid small { margin-top:auto; color:var(--red); line-height:1.45; }
+.alternatives { padding:24px; background:#efede7; }
+.alternatives ul { margin:0; padding-left:20px; display:grid; gap:12px; color:var(--muted); line-height:1.5; }
+.alternatives strong { color:var(--ink); }
+@media (max-width:760px) {
+  .readinessBox,.operationGrid { grid-template-columns:1fr; }
+  .readinessBox>div { border-left:0; border-top:1px solid var(--line); }
+  .readinessBox>div:first-child { border-top:0; }
+  .alternatives { padding:18px 16px; }
+}
