@@ -119,13 +119,26 @@ def discover_objects(
     paginator = s3_client.get_paginator("list_objects_v2")
     found: list[RemoteObject] = []
     scanned = 0
+    selected_bytes = 0
+
+    def add_selected(item: dict[str, Any]) -> None:
+        nonlocal selected_bytes
+        if len(found) >= max_objects:
+            raise RemoteSourceError("Selection exceeds the pilot file limit.")
+        mapped = _mapped(source, item)
+        selected_bytes += mapped.size_bytes
+        if selected_bytes > max_total_bytes:
+            raise RemoteSourceError("Selection exceeds the pilot byte limit for one run.")
+        found.append(mapped)
 
     if source.provider == "CloudFront":
         for prefix in _cloudfront_prefixes(source, day, hours):
             for page in paginator.paginate(Bucket=source.bucket, Prefix=prefix):
                 for item in _page_objects(page):
                     scanned += 1
-                    found.append(_mapped(source, item))
+                    if scanned > max_scanned_keys:
+                        raise RemoteSourceError("The source index is too large for a safe interactive scan.")
+                    add_selected(item)
     elif source.provider == "Akamai":
         markers = _akamai_markers(day, hours)
         for page in paginator.paginate(Bucket=source.bucket, Prefix=source.prefix):
@@ -135,16 +148,11 @@ def discover_objects(
                     raise RemoteSourceError("The source index is too large for a safe interactive scan.")
                 key = str(item["Key"])
                 if any(marker in key for marker in markers):
-                    found.append(_mapped(source, item))
+                    add_selected(item)
     else:
         raise RemoteSourceError("Source provider is not supported.")
 
     objects = sorted({item.key: item for item in found}.values(), key=lambda item: item.key)
     if not objects:
         raise RemoteSourceError("No log files were found for the selected UTC period.")
-    if len(objects) > max_objects:
-        raise RemoteSourceError(f"Selection contains {len(objects)} files; the pilot limit is {max_objects}.")
-    total = sum(item.size_bytes for item in objects)
-    if total > max_total_bytes:
-        raise RemoteSourceError(f"Selection exceeds the pilot byte limit for one run.")
     return objects
