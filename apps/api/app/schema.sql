@@ -177,3 +177,22 @@ CREATE TABLE IF NOT EXISTS user_sessions (
 
 CREATE INDEX IF NOT EXISTS idx_user_sessions_active ON user_sessions(user_id,expires_at DESC) WHERE revoked_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_audit_events_created ON audit_events(created_at DESC);
+
+
+ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS remote_source_id TEXT;
+ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS selected_day DATE;
+ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS start_hour_utc SMALLINT;
+ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS end_hour_utc SMALLINT;
+ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS selected_bytes BIGINT;
+ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS estimated_transfer_cost_usd NUMERIC(12,6);
+ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;
+ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS cancelled_by TEXT;
+ALTER TABLE app_users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT TRUE;
+
+ALTER TABLE analysis_runs DROP CONSTRAINT IF EXISTS analysis_runs_status_check;
+ALTER TABLE analysis_runs ADD CONSTRAINT analysis_runs_status_check CHECK (status IN ('uploading','verifying','queued','processing','aggregating','cancelling','completed','failed','cancelled'));
+ALTER TABLE analysis_runs DROP CONSTRAINT IF EXISTS analysis_runs_remote_hours_check;
+ALTER TABLE analysis_runs ADD CONSTRAINT analysis_runs_remote_hours_check CHECK (
+    (start_hour_utc IS NULL AND end_hour_utc IS NULL)
+    OR (start_hour_utc >= 0 AND start_hour_utc < end_hour_utc AND end_hour_utc <= 24)
+);
