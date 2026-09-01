@@ -180,6 +180,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_events_created ON audit_events(created_at D
 
 
 ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS remote_source_id TEXT;
+ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS created_by_email TEXT;
 ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS selected_day DATE;
 ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS start_hour_utc SMALLINT;
 ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS end_hour_utc SMALLINT;
