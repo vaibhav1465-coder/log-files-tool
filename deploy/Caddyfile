@@ -6,10 +6,6 @@ http://:8080 {
     bind 0.0.0.0
     encode zstd gzip
 
-    basic_auth {
-        import /run/secrets/caddy-users
-    }
-
     header {
         X-Content-Type-Options "nosniff"
         X-Frame-Options "DENY"
@@ -21,9 +17,7 @@ http://:8080 {
 
     @api path /api/* /docs* /openapi.json /redoc*
     handle @api {
-        reverse_proxy api:8000 {
-            header_up X-Authenticated-User {http.auth.user.id}
-        }
+        reverse_proxy api:8000
     }
 
     handle {
