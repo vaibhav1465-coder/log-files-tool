@@ -10,6 +10,7 @@ type Metrics = {
 };
 type UrlItem = { normalized_url: string; status_code: number; request_count: number; first_seen: string; last_seen: string; response_bytes: number | null; googlebot_request_count: number };
 type UrlPage = { total: number; page: number; page_size: number; items: UrlItem[] };
+type RunDetail = { remote_source_id?:string|null; selected_day?:string|null; start_hour_utc?:number|null; end_hour_utc?:number|null; selected_bytes?:number|null; estimated_transfer_cost_usd?:number|null };
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -23,6 +24,7 @@ function duration(seconds: number | null) {
 export default function AnalysisResults() {
   const [runId, setRunId] = useState<string | null>(null);
   const [metrics, setMetrics] = useState<Metrics | null>(null);
+  const [runDetail, setRunDetail] = useState<RunDetail | null>(null);
   const [urls, setUrls] = useState<UrlPage | null>(null);
   const [status, setStatus] = useState<string>("");
   const [googlebotOnly, setGooglebotOnly] = useState(false);
@@ -36,11 +38,13 @@ export default function AnalysisResults() {
       if (selectedStatus) params.set("status", selectedStatus);
       if (botOnly) params.set("googlebot_only", "true");
       if (query) params.set("search", query);
-      const [metricResponse, urlResponse] = await Promise.all([
+      const [detailResponse, metricResponse, urlResponse] = await Promise.all([
+        fetch(`${apiUrl}/api/v1/runs/${selected}`, { cache: "no-store" }),
         fetch(`${apiUrl}/api/v1/runs/${selected}/metrics`, { cache: "no-store" }),
         fetch(`${apiUrl}/api/v1/runs/${selected}/urls?${params}`, { cache: "no-store" }),
       ]);
-      if (!metricResponse.ok || !urlResponse.ok) throw new Error("Run evidence could not be loaded");
+      if (!detailResponse.ok || !metricResponse.ok || !urlResponse.ok) throw new Error("Run evidence could not be loaded");
+      setRunDetail(await detailResponse.json() as RunDetail);
       setMetrics(await metricResponse.json() as Metrics);
       setUrls(await urlResponse.json() as UrlPage);
       setPage(requestedPage);
@@ -62,7 +66,7 @@ export default function AnalysisResults() {
 
   if (!runId) return <section className="resultsPanel" id="results"><div className="emptyLibrary"><strong>Select a completed run</strong><span>Use View results in the Analysis Library to open its evidence.</span></div></section>;
   if (error) return <section className="resultsPanel" id="results"><div className="resultBanner failed"><strong>Evidence unavailable</strong><span>{error}</span></div></section>;
-  if (!metrics || !urls) return <section className="resultsPanel" id="results"><div className="emptyLibrary"><strong>Loading evidence…</strong></div></section>;
+  if (!metrics || !urls || !runDetail) return <section className="resultsPanel" id="results"><div className="emptyLibrary"><strong>Loading evidence…</strong></div></section>;
 
   const cards = [
     ["Googlebot hits", metrics.crawl.googlebot_hits.toLocaleString()],
@@ -80,6 +84,7 @@ export default function AnalysisResults() {
   return (
     <section className="resultsPanel" id="results">
       <div className="sectionHeading"><div><p className="eyebrow">RUN {runId.slice(0, 8)} · EVIDENCE RESULTS</p><h2>Crawl and response evidence</h2></div><span className="devBadge">{metrics.evidence_state}</span></div>
+      <div className="qualityStrip"><span><strong>{runDetail.remote_source_id??"Legacy source"}</strong> log source</span><span><strong>{runDetail.selected_day??"Not recorded"}</strong> selected date</span><span><strong>{runDetail.start_hour_utc===null||runDetail.start_hour_utc===undefined?"Not recorded":`${String(runDetail.start_hour_utc).padStart(2,"0")}:00–${String(runDetail.end_hour_utc).padStart(2,"0")}:00 UTC`}</strong> selected timeframe</span><span><strong>{runDetail.selected_bytes===null||runDetail.selected_bytes===undefined?"Not recorded":`${(runDetail.selected_bytes/1024**3).toFixed(2)} GB · est. ${(runDetail.estimated_transfer_cost_usd??0).toFixed(4)}`}</strong> source size / transfer</span></div>
       <div className="qualityStrip"><span><strong>{metrics.processed_lines.toLocaleString()}</strong> processed</span><span><strong>{metrics.accepted_lines.toLocaleString()}</strong> accepted</span><span><strong>{metrics.rejected_lines.toLocaleString()}</strong> rejected</span><span><strong>{metrics.acceptance_rate === null ? "Not calculated" : `${(metrics.acceptance_rate * 100).toFixed(2)}%`}</strong> acceptance</span></div>
       <div className="metricCards">{cards.map(([label, value]) => <article key={label}><span>{label}</span><strong>{value}</strong></article>)}</div>
       <p className="methodNote">Bot identity: {metrics.crawl.evidence_label}. Average revisit duration is weighted across observed repeat intervals; median and percentiles describe each recrawled URL&apos;s mean interval. URLs without repeat evidence are excluded.</p>
