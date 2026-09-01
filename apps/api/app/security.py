@@ -11,7 +11,7 @@ from starlette.responses import JSONResponse
 from .config import get_settings
 
 
-PUBLIC_PATHS = {"/api/v1/health", "/docs", "/openapi.json", "/redoc"}
+PUBLIC_PATHS = {"/api/v1/health"}
 
 
 class SecurityMiddleware(BaseHTTPMiddleware):
@@ -21,6 +21,9 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         settings = get_settings()
         request_id = request.headers.get("X-Request-ID", str(uuid4()))[:128]
         client_ip = request.client.host if request.client else "unknown"
+
+        if settings.environment == "production" and not settings.allow_local_uploads and (request.url.path.startswith("/api/v1/uploads") or request.url.path == "/api/v1/preflight"):
+            return JSONResponse({"detail": "Local uploads are disabled for this deployment", "request_id": request_id}, status_code=404)
 
         if settings.require_api_key and request.url.path not in PUBLIC_PATHS:
             supplied = request.headers.get("X-API-Key", "")
