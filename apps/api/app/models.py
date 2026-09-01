@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
@@ -72,6 +72,14 @@ class RunSummary(BaseModel):
     completed_at: datetime | None = None
     error_code: str | None = None
     error_message: str | None = None
+    remote_source_id: str | None = None
+    selected_day: date | None = None
+    start_hour_utc: int | None = None
+    end_hour_utc: int | None = None
+    selected_bytes: int | None = None
+    estimated_transfer_cost_usd: float | None = None
+    cancelled_at: datetime | None = None
+    cancelled_by: str | None = None
 
 
 class RunDetail(RunSummary):
