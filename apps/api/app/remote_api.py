@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .config import get_settings
@@ -82,12 +82,11 @@ def estimate_remote_run(payload: RemoteSelection) -> RemoteEstimate:
 
 
 @router.post("/remote-runs", status_code=202)
-def create_remote_run(
-    payload: RemoteSelection,
-    authenticated_user: str = Header(default="unknown", alias="X-Authenticated-User"),
-) -> dict:
+def create_remote_run(payload: RemoteSelection, request: Request) -> dict:
     settings = get_settings()
     source, objects = _safe_objects(payload)
+    session_user = getattr(request.state, "user", None)
+    authenticated_user = session_user["email"] if session_user else "development-user"
     actor = re.sub(r"[^A-Za-z0-9._@-]", "_", authenticated_user)[:128] or "unknown"
 
     s3 = boto3.client("s3")
