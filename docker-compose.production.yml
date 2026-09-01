@@ -13,6 +13,8 @@ x-api-environment: &api-environment
   UPLOAD_RATE_LIMIT_PER_MINUTE: ${UPLOAD_RATE_LIMIT_PER_MINUTE:-10}
   REQUIRE_API_KEY: "false"
   ALLOW_LOCAL_UPLOADS: "false"
+  SESSION_HOURS: "12"
+  SESSION_COOKIE_SECURE: "false"
   FE_CLOUDFRONT_BUCKET: ${FE_CLOUDFRONT_BUCKET:-}
   FE_CLOUDFRONT_PREFIX: ${FE_CLOUDFRONT_PREFIX:-}
   FE_AKAMAI_BUCKET: ${FE_AKAMAI_BUCKET:-}
@@ -35,7 +37,6 @@ services:
       - "8080:8080"
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./deploy/secrets/caddy-users:/run/secrets/caddy-users:ro
       - ${EXPRESS_DATA_ROOT:?set EXPRESS_DATA_ROOT}/caddy-data:/data
       - ${EXPRESS_DATA_ROOT}/caddy-config:/config
       - ${EXPRESS_DATA_ROOT}/logs/caddy:/var/log/caddy
