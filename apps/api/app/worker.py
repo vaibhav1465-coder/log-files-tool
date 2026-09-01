@@ -13,6 +13,7 @@ from .intake import iter_analysis_lines
 from .processing import aggregate_lines
 from .gsc import GscClient
 from .queue import GROUP, STREAM
+from .source_stream import open_source_stream
 
 
 def update_run(run_id: str, **values) -> None:
@@ -37,7 +38,7 @@ def process_run(run_id: str, heartbeat=lambda: None) -> None:
     total_processed = total_accepted = total_rejected = 0
     all_status: dict[int, dict] = {}
     try:
-        scratch_root = Path(files[0]["stored_path"]).parent
+        scratch_root = Path(settings.storage_root)
 
         def guard_resources() -> None:
             free = shutil.disk_usage(scratch_root).free
@@ -56,8 +57,9 @@ def process_run(run_id: str, heartbeat=lambda: None) -> None:
                     )
 
         for source in files:
-            with Path(source["stored_path"]).open("rb") as stream:
-                lines, _ = iter_analysis_lines(stream, source["original_name"], max_bytes=run["analysis_limit_bytes"], source_size_bytes=source["size_bytes"])
+            with open_source_stream(settings, source["stored_path"]) as stream:
+                byte_limit = None if source["stored_path"].startswith("s3://") else run["analysis_limit_bytes"]
+                lines, _ = iter_analysis_lines(stream, source["original_name"], max_bytes=byte_limit, source_size_bytes=source["size_bytes"])
                 def progress(count: int) -> None:
                     update_run(run_id, processed_lines=total_processed + count)
                 summary = aggregate_lines(
