@@ -150,3 +150,30 @@ ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS eta_likely_seconds INTEGER;
 ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS eta_high_seconds INTEGER;
 ALTER TABLE analysis_runs DROP CONSTRAINT IF EXISTS analysis_limit_positive;
 ALTER TABLE analysis_runs ADD CONSTRAINT analysis_limit_positive CHECK (analysis_limit_bytes IS NULL OR analysis_limit_bytes > 0);
+
+CREATE TABLE IF NOT EXISTS app_users (
+    id UUID PRIMARY KEY,
+    email TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'analyst' CHECK (role IN ('analyst','admin')),
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_login_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS user_sessions (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES app_users(id),
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ,
+    user_agent_hash TEXT NOT NULL,
+    client_ip_hash TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_sessions_active ON user_sessions(user_id,expires_at DESC) WHERE revoked_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_audit_events_created ON audit_events(created_at DESC);
