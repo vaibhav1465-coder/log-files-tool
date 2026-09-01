@@ -78,7 +78,9 @@ def process_run(run_id: str, heartbeat=lambda: None) -> None:
             conn.execute("INSERT INTO status_aggregates (run_id,status_code,request_count,unique_url_count,response_bytes) SELECT run_id,status_code,SUM(request_count),COUNT(*),SUM(response_bytes) FROM url_aggregates WHERE run_id=%s GROUP BY run_id,status_code", (run_id,))
             conn.execute("UPDATE analysis_runs SET status='completed', phase='completed', progress_percent=100, evidence_state=CASE WHEN processed_lines > 0 AND accepted_lines::numeric/processed_lines >= 0.95 THEN 'passed' ELSE 'partial' END, completed_at=NOW() WHERE id=%s", (run_id,))
     except Exception as exc:
-        update_run(run_id, status="failed", phase="failed", error_code=type(exc).__name__, error_message=str(exc)[:1000])
+        remote = any(item["stored_path"].startswith("s3://") for item in files)
+        message = "Remote source processing failed safely" if remote else str(exc)[:1000]
+        update_run(run_id, status="failed", phase="failed", error_code=type(exc).__name__, error_message=message)
 
 
 def sync_gsc_property(property_id: str) -> None:
