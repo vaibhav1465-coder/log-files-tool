@@ -1,3 +1,4 @@
+import gzip
 import io
 from pathlib import PurePosixPath
 from typing import BinaryIO, Iterator
@@ -37,8 +38,20 @@ def _decoded_lines(stream: BinaryIO, max_bytes: int | None = None) -> Iterator[s
         wrapper.detach()
 
 
+def _gzip_lines(file: BinaryIO, max_bytes: int | None = None) -> Iterator[str]:
+    compressed = gzip.GzipFile(fileobj=file, mode="rb")
+    try:
+        yield from _decoded_lines(compressed, max_bytes)
+    except (EOFError, gzip.BadGzipFile, OSError) as exc:
+        raise IntakeFailure("GZIP_INVALID", "The gzip file is corrupt or unsupported.") from exc
+    finally:
+        compressed.close()
+
+
 def iter_preflight_lines(file: BinaryIO, filename: str) -> tuple[Iterator[str], int]:
     lower = filename.lower()
+    if lower.endswith((".gz", ".gzip")):
+        return _gzip_lines(file, MAX_PREFLIGHT_UNCOMPRESSED_BYTES), 1
     if not lower.endswith(".zip"):
         return _decoded_lines(file), 1
 
@@ -90,6 +103,8 @@ def iter_preflight_lines(file: BinaryIO, filename: str) -> tuple[Iterator[str], 
 
 def iter_analysis_lines(file: BinaryIO, filename: str, max_bytes: int | None = None, source_size_bytes: int | None = None) -> tuple[Iterator[str], int]:
     lower = filename.lower()
+    if lower.endswith((".gz", ".gzip")):
+        return _gzip_lines(file, max_bytes), 1
     if not lower.endswith(".zip"):
         return _decoded_lines(file, max_bytes), 1
 
