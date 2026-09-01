@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import re
 from datetime import date
 from pathlib import PurePosixPath
 from uuid import uuid4
 
 import boto3
-from fastapi import APIRouter, HTTPException
+from botocore.exceptions import BotoCoreError, ClientError
+from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from .config import get_settings
@@ -53,6 +56,15 @@ def _objects(payload: RemoteSelection):
     )
 
 
+def _safe_objects(payload: RemoteSelection):
+    try:
+        return _objects(payload)
+    except RemoteSourceError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (BotoCoreError, ClientError) as exc:
+        raise HTTPException(status_code=502, detail="The approved AWS source is temporarily unavailable.") from exc
+
+
 @router.get("/remote-sources")
 def list_remote_sources() -> list[dict[str, str]]:
     return source_catalog(get_settings())
@@ -60,10 +72,7 @@ def list_remote_sources() -> list[dict[str, str]]:
 
 @router.post("/remote-runs/estimate", response_model=RemoteEstimate)
 def estimate_remote_run(payload: RemoteSelection) -> RemoteEstimate:
-    try:
-        _, objects = _objects(payload)
-    except RemoteSourceError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _, objects = _safe_objects(payload)
     return RemoteEstimate(
         **payload.model_dump(),
         file_count=len(objects),
@@ -73,22 +82,30 @@ def estimate_remote_run(payload: RemoteSelection) -> RemoteEstimate:
 
 
 @router.post("/remote-runs", status_code=202)
-def create_remote_run(payload: RemoteSelection) -> dict:
+def create_remote_run(
+    payload: RemoteSelection,
+    authenticated_user: str = Header(default="unknown", alias="X-Authenticated-User"),
+) -> dict:
     settings = get_settings()
-    try:
-        source, objects = _objects(payload)
-    except RemoteSourceError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    source, objects = _safe_objects(payload)
+    actor = re.sub(r"[^A-Za-z0-9._@-]", "_", authenticated_user)[:128] or "unknown"
 
     s3 = boto3.client("s3")
     first = objects[0]
-    response = s3.get_object(Bucket=first.bucket, Key=first.key)
-    body = response["Body"]
+    lines = None
+    body = None
     try:
+        response = s3.get_object(Bucket=first.bucket, Key=first.key)
+        body = response["Body"]
         lines, _ = iter_preflight_lines(body, PurePosixPath(first.key).name)
         sample = preflight(lines, limit=SAMPLE_LINES)
+    except (BotoCoreError, ClientError) as exc:
+        raise HTTPException(status_code=502, detail="The approved AWS source could not be sampled.") from exc
     finally:
-        body.close()
+        if lines is not None and hasattr(lines, "close"):
+            lines.close()
+        if body is not None:
+            body.close()
     if sample.evidence_state != "passed" or sample.profile != "cdn_access":
         raise HTTPException(status_code=422, detail="Selected source did not pass the CDN log quality gate.")
 
@@ -112,15 +129,22 @@ def create_remote_run(payload: RemoteSelection) -> dict:
                 (uuid4(), run_id, PurePosixPath(item.key).name, item.uri, item.size_bytes, uri_hash, item.size_bytes, item.size_bytes),
             )
         conn.execute(
-            "INSERT INTO audit_events (id,actor,action,target_type,target_id,result,detail) VALUES (%s,'authenticated-team-user','remote_analysis_created','analysis_run',%s,'accepted',%s::jsonb)",
-            (uuid4(), str(run_id), __import__("json").dumps({
-                "source_id": source.id,
-                "day": payload.day.isoformat(),
-                "start_hour_utc": payload.start_hour_utc,
-                "end_hour_utc": payload.end_hour_utc,
-                "file_count": len(objects),
-                "total_bytes": total_bytes,
-            })),
+            "INSERT INTO audit_events (id,actor,action,target_type,target_id,result,detail) VALUES (%s,%s,'remote_analysis_created','analysis_run',%s,'accepted',%s::jsonb)",
+            (
+                uuid4(),
+                actor,
+                str(run_id),
+                json.dumps(
+                    {
+                        "source_id": source.id,
+                        "day": payload.day.isoformat(),
+                        "start_hour_utc": payload.start_hour_utc,
+                        "end_hour_utc": payload.end_hour_utc,
+                        "file_count": len(objects),
+                        "total_bytes": total_bytes,
+                    }
+                ),
+            ),
         )
     enqueue_job({"run_id": str(run_id)})
     return {
