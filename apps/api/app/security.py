@@ -22,7 +22,12 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         request_id = request.headers.get("X-Request-ID", str(uuid4()))[:128]
         client_ip = request.client.host if request.client else "unknown"
 
-        if settings.environment == "production" and not settings.allow_local_uploads and (request.url.path.startswith("/api/v1/uploads") or request.url.path == "/api/v1/preflight"):
+        local_intake_path = (
+            request.url.path.startswith("/api/v1/uploads")
+            or request.url.path == "/api/v1/preflight"
+            or (request.method == "POST" and request.url.path == "/api/v1/runs")
+        )
+        if settings.environment == "production" and not settings.allow_local_uploads and local_intake_path:
             return JSONResponse({"detail": "Local uploads are disabled for this deployment", "request_id": request_id}, status_code=404)
 
         if settings.require_api_key and request.url.path not in PUBLIC_PATHS:
