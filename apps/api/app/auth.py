@@ -130,7 +130,7 @@ def login(payload: LoginRequest, request: Request, response: Response) -> dict:
 
 
 @router.post("/auth/logout")
-def logout(request: Request, response: Response) -> None:
+def logout(request: Request, response: Response) -> dict:
     user = current_user(request)
     token = request.cookies.get(SESSION_COOKIE)
     with connection() as conn:
@@ -146,7 +146,7 @@ def me(request: Request) -> dict:
 
 
 @router.post("/auth/change-password")
-def change_password(payload: PasswordChange, request: Request) -> None:
+def change_password(payload: PasswordChange, request: Request) -> dict:
     user = current_user(request)
     with connection() as conn:
         stored = conn.execute("SELECT password_hash FROM app_users WHERE id=%s", (user["id"],)).fetchone()
@@ -189,6 +189,7 @@ def update_user(user_id: str, payload: UserUpdate, request: Request) -> dict:
     if str(admin["id"]) == user_id and payload.active is False:
         raise HTTPException(status_code=409, detail="You cannot remove your own access.")
     with connection() as conn:
+        conn.execute("SELECT pg_advisory_xact_lock(%s)", (0x41555448,))
         target = conn.execute("SELECT * FROM app_users WHERE id=%s FOR UPDATE", (user_id,)).fetchone()
         if not target:
             raise HTTPException(status_code=404, detail="User not found")
