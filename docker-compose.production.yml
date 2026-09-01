@@ -1,4 +1,4 @@
-name: express-intelligence-production
+name: express-intelligence-private-pilot
 
 x-api-environment: &api-environment
   ENVIRONMENT: production
@@ -7,25 +7,32 @@ x-api-environment: &api-environment
   STORAGE_ROOT: /data/source-files
   MAX_FILE_BYTES: ${MAX_FILE_BYTES:-5000000000}
   STORAGE_RESERVE_BYTES: ${STORAGE_RESERVE_BYTES:-20000000000}
-  MAX_ACTIVE_UPLOADS: ${MAX_ACTIVE_UPLOADS:-1}
-  MAX_CHUNK_BYTES: ${MAX_CHUNK_BYTES:-67108864}
-  RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-300}
-  UPLOAD_RATE_LIMIT_PER_MINUTE: ${UPLOAD_RATE_LIMIT_PER_MINUTE:-120}
-  REQUIRE_API_KEY: "false"\n  ALLOW_LOCAL_UPLOADS: "false"\n  FE_CLOUDFRONT_BUCKET: ${FE_CLOUDFRONT_BUCKET:-}\n  FE_CLOUDFRONT_PREFIX: ${FE_CLOUDFRONT_PREFIX:-}\n  FE_AKAMAI_BUCKET: ${FE_AKAMAI_BUCKET:-}\n  FE_AKAMAI_PREFIX: ${FE_AKAMAI_PREFIX:-}\n  REMOTE_MAX_OBJECTS: ${REMOTE_MAX_OBJECTS:-5000}\n  REMOTE_MAX_TOTAL_BYTES: ${REMOTE_MAX_TOTAL_BYTES:-20000000000}\n  REMOTE_MAX_SCANNED_KEYS: ${REMOTE_MAX_SCANNED_KEYS:-1000000}\n  REMOTE_MAX_ACTIVE_RUNS: "1"
+  MAX_ACTIVE_UPLOADS: "1"
+  MAX_CHUNK_BYTES: ${MAX_CHUNK_BYTES:-16777216}
+  RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-120}
+  UPLOAD_RATE_LIMIT_PER_MINUTE: ${UPLOAD_RATE_LIMIT_PER_MINUTE:-10}
+  REQUIRE_API_KEY: "false"
+  ALLOW_LOCAL_UPLOADS: "false"
+  FE_CLOUDFRONT_BUCKET: ${FE_CLOUDFRONT_BUCKET:-}
+  FE_CLOUDFRONT_PREFIX: ${FE_CLOUDFRONT_PREFIX:-}
+  FE_AKAMAI_BUCKET: ${FE_AKAMAI_BUCKET:-}
+  FE_AKAMAI_PREFIX: ${FE_AKAMAI_PREFIX:-}
+  REMOTE_MAX_OBJECTS: ${REMOTE_MAX_OBJECTS:-5000}
+  REMOTE_MAX_TOTAL_BYTES: ${REMOTE_MAX_TOTAL_BYTES:-20000000000}
+  REMOTE_MAX_SCANNED_KEYS: ${REMOTE_MAX_SCANNED_KEYS:-1000000}
+  REMOTE_MAX_ACTIVE_RUNS: "1"
   ALLOWED_ORIGINS: http://${APP_HOST:?set APP_HOST}:8080
   TRUSTED_HOSTS: ${APP_HOST},api,localhost,127.0.0.1
-  DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
+  DB_POOL_SIZE: ${DB_POOL_SIZE:-8}
 
 services:
   gateway:
     image: caddy:2.10-alpine
     restart: unless-stopped
     environment:
-      APP_DOMAIN: ${APP_DOMAIN}
-      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL}
+      APP_BIND: 0.0.0.0:8080
     ports:
-      - "80:80"
-      - "443:443"
+      - "8080:8080"
     volumes:
       - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./deploy/secrets/caddy-users:/run/secrets/caddy-users:ro
@@ -83,8 +90,6 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
-    deploy:
-      replicas: ${WORKER_REPLICAS:-1}
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
 
@@ -93,11 +98,11 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-express_intelligence}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
     volumes:
       - ${EXPRESS_DATA_ROOT}/postgres:/var/lib/postgresql/data
-    shm_size: 2gb
+    shm_size: 1gb
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 10s
@@ -110,7 +115,7 @@ services:
   redis:
     image: redis:7.4-alpine
     restart: unless-stopped
-    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--requirepass", "${REDIS_PASSWORD}"]
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--requirepass", "${REDIS_PASSWORD:?set REDIS_PASSWORD}"]
     volumes:
       - ${EXPRESS_DATA_ROOT}/redis:/data
     healthcheck:
@@ -119,7 +124,7 @@ services:
       timeout: 5s
       retries: 10
     environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD}
     security_opt: ["no-new-privileges:true"]
     cap_drop: ["ALL"]
     cap_add: ["SETGID", "SETUID"]
@@ -130,9 +135,9 @@ services:
     environment:
       PGHOST: postgres
       PGDATABASE: ${POSTGRES_DB:-express_intelligence}
-      PGUSER: ${POSTGRES_USER}
-      PGPASSWORD: ${POSTGRES_PASSWORD}
-      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      PGUSER: ${POSTGRES_USER:?set POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-3}
     volumes:
       - ${EXPRESS_BACKUP_ROOT:?set EXPRESS_BACKUP_ROOT}:/backups
       - ./deploy/backup.sh:/usr/local/bin/backup.sh:ro
