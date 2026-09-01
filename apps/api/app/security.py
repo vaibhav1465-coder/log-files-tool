@@ -14,6 +14,7 @@ from .config import get_settings
 
 
 PUBLIC_PATHS = {"/api/v1/health", "/api/v1/auth/login"}
+PASSWORD_CHANGE_PATHS = {"/api/v1/auth/me", "/api/v1/auth/change-password", "/api/v1/auth/logout"}
 
 
 def is_local_intake(method: str, path: str) -> bool:
@@ -40,6 +41,8 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             if not user:
                 return JSONResponse({"detail": "Authentication required", "request_id": request_id}, status_code=401)
             request.state.user = user
+            if user.get("must_change_password") and request.url.path not in PASSWORD_CHANGE_PATHS:
+                return JSONResponse({"detail": "Password change required", "code": "PASSWORD_CHANGE_REQUIRED", "request_id": request_id}, status_code=403)
             if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
                 origin = request.headers.get("origin")
                 host = request.headers.get("host", "")
