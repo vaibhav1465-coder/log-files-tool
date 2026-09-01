@@ -3,8 +3,8 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type RemoteSource = { id: string; label: string; provider: string; timezone: string };
-type Estimate = { source_id:string; day:string; start_hour_utc:number; end_hour_utc:number; file_count:number; total_bytes:number; files:Array<{filename:string;size_bytes:number;last_modified?:string}> };
-type QueuedRun = { id:string; status:string; file_count:number; total_bytes:number; eta_likely_seconds?:number };
+type Estimate = { source_id:string; day:string; start_hour_utc:number; end_hour_utc:number; file_count:number; total_bytes:number; estimated_transfer_cost_usd:number; files:Array<{filename:string;size_bytes:number;last_modified?:string}> };
+type QueuedRun = { id:string; status:string; file_count:number; total_bytes:number; eta_likely_seconds?:number; estimated_transfer_cost_usd:number };
 const apiUrl = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/$/, "");
 
 function formatBytes(bytes:number){if(!bytes)return"0 B";const units=["B","KB","MB","GB"];const index=Math.min(Math.floor(Math.log(bytes)/Math.log(1024)),units.length-1);return `${(bytes/1024**index).toFixed(index?1:0)} ${units[index]}`;}
@@ -47,8 +47,8 @@ export default function NewAnalysis(){
         <small>UTC is used because both log sources are stored by UTC hour. IST is UTC +5:30.</small>
       </fieldset>
       {!estimate&&!run?<div className="formActions"><p>The tool checks file count and size before processing. Source buckets remain read-only.</p><button type="button" className="primaryButton" onClick={checkSelection} disabled={!sourceId||!day||busy}>{busy?"Checking…":"Check selected period"}</button></div>:null}
-      {estimate?<div className="estimateCard"><strong>{estimate.file_count} files · {formatBytes(estimate.total_bytes)}</strong><span>Approved for one sequential analysis job</span><p>No files are copied permanently. Gzip content is streamed from AWS and temporary processing data is cleaned automatically.</p><button className="primaryButton" disabled={busy}>{busy?"Starting…":"Start analysis"}</button></div>:null}
-      {run?<div className="resultBanner passed"><strong>Analysis queued</strong><span>Run {run.id.slice(0,8)} · {run.file_count} files · expected time {formatDuration(run.eta_likely_seconds)}. You may close this page.</span></div>:null}
+      {estimate?<div className="estimateCard"><strong>{estimate.file_count} files · {formatBytes(estimate.total_bytes)} · est. ${estimate.estimated_transfer_cost_usd.toFixed(4)}</strong><span>Estimated transfer at $0.09/GB · Approved for one sequential analysis job</span><p>No files are copied permanently. Gzip content is streamed from AWS and temporary processing data is cleaned automatically.</p><button className="primaryButton" disabled={busy}>{busy?"Starting…":"Start analysis"}</button></div>:null}
+      {run?<div className="resultBanner passed"><strong>Analysis queued</strong><span>Run {run.id.slice(0,8)} · {sources.find(item=>item.id===sourceId)?.label??sourceId} · {day} · {String(startHour).padStart(2,"0")}:00–{String(endHour).padStart(2,"0")}:00 UTC · {run.file_count} files · expected time {formatDuration(run.eta_likely_seconds)}. You may close this page.</span></div>:null}
       {error?<div className="resultBanner failed"><strong>Unable to continue safely</strong><span>{error}</span></div>:null}
     </form>
   </section>;
