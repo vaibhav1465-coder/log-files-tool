@@ -73,7 +73,7 @@ def _fingerprint(value: str) -> str:
 
 
 def _public_user(row: dict) -> dict:
-    return {"id": str(row["id"]), "email": row["email"], "display_name": row["display_name"], "role": row["role"], "active": row["active"], "created_at": row.get("created_at"), "last_login_at": row.get("last_login_at")}
+    return {"id": str(row["id"]), "email": row["email"], "display_name": row["display_name"], "role": row["role"], "active": row["active"], "created_at": row.get("created_at"), "last_login_at": row.get("last_login_at"), "must_change_password": row.get("must_change_password", False)}
 
 
 def authenticate_session(token: str | None) -> dict | None:
@@ -81,7 +81,7 @@ def authenticate_session(token: str | None) -> dict | None:
         return None
     with connection() as conn:
         row = conn.execute(
-            """SELECT u.id,u.email,u.display_name,u.role,u.active,u.created_at,u.last_login_at,
+            """SELECT u.id,u.email,u.display_name,u.role,u.active,u.created_at,u.last_login_at,u.must_change_password,
                       s.id session_id,s.expires_at,s.last_seen_at
                FROM user_sessions s JOIN app_users u ON u.id=s.user_id
                WHERE s.token_hash=%s AND s.revoked_at IS NULL AND s.expires_at>NOW() AND u.active""",
@@ -152,7 +152,7 @@ def change_password(payload: PasswordChange, request: Request) -> dict:
         stored = conn.execute("SELECT password_hash FROM app_users WHERE id=%s", (user["id"],)).fetchone()
         if not stored or not verify_password(payload.current_password, stored["password_hash"]):
             raise HTTPException(status_code=422, detail="Current password is incorrect.")
-        conn.execute("UPDATE app_users SET password_hash=%s,updated_at=NOW() WHERE id=%s", (hash_password(payload.new_password), user["id"]))
+        conn.execute("UPDATE app_users SET password_hash=%s,must_change_password=FALSE,updated_at=NOW() WHERE id=%s", (hash_password(payload.new_password), user["id"]))
         conn.execute("UPDATE user_sessions SET revoked_at=NOW() WHERE user_id=%s AND id<>%s", (user["id"], user["session_id"]))
         _audit(conn, user["email"], "auth.password_change", "user", str(user["id"]), "success")
     return {"status": "password_changed"}
@@ -162,7 +162,7 @@ def change_password(payload: PasswordChange, request: Request) -> dict:
 def list_users(request: Request) -> list[dict]:
     require_admin(request)
     with connection() as conn:
-        rows = conn.execute("""SELECT u.id,u.email,u.display_name,u.role,u.active,u.created_at,u.last_login_at,
+        rows = conn.execute("""SELECT u.id,u.email,u.display_name,u.role,u.active,u.created_at,u.last_login_at,u.must_change_password,
                                       COUNT(s.id) FILTER (WHERE s.revoked_at IS NULL AND s.expires_at>NOW()) active_sessions
                                FROM app_users u LEFT JOIN user_sessions s ON s.user_id=u.id
                                GROUP BY u.id ORDER BY u.active DESC,u.role DESC,u.display_name""").fetchall()
