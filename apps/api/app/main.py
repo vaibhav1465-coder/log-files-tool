@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import StreamingResponse
 
+from .auth import router as auth_router
 from .config import get_settings
 from .intake import MAX_FILES_PER_BATCH, SAMPLE_LINES, IntakeFailure, iter_preflight_lines
 from .db import connection, initialize_database
@@ -29,6 +30,7 @@ app = FastAPI(title=settings.app_name, version="0.1.0")
 app.add_middleware(SecurityMiddleware)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.accepted_hosts)
 app.include_router(remote_router)
+app.include_router(auth_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
