@@ -14,6 +14,14 @@ from .config import get_settings
 PUBLIC_PATHS = {"/api/v1/health"}
 
 
+def is_local_intake(method: str, path: str) -> bool:
+    return (
+        path.startswith("/api/v1/uploads")
+        or path == "/api/v1/preflight"
+        or (method.upper() == "POST" and path == "/api/v1/runs")
+    )
+
+
 class SecurityMiddleware(BaseHTTPMiddleware):
     """Authentication, fixed-window limits, tracing, and browser hardening."""
 
@@ -22,12 +30,7 @@ class SecurityMiddleware(BaseHTTPMiddleware):
         request_id = request.headers.get("X-Request-ID", str(uuid4()))[:128]
         client_ip = request.client.host if request.client else "unknown"
 
-        local_intake_path = (
-            request.url.path.startswith("/api/v1/uploads")
-            or request.url.path == "/api/v1/preflight"
-            or (request.method == "POST" and request.url.path == "/api/v1/runs")
-        )
-        if settings.environment == "production" and not settings.allow_local_uploads and local_intake_path:
+        if settings.environment == "production" and not settings.allow_local_uploads and is_local_intake(request.method, request.url.path):
             return JSONResponse({"detail": "Local uploads are disabled for this deployment", "request_id": request_id}, status_code=404)
 
         if settings.require_api_key and request.url.path not in PUBLIC_PATHS:
