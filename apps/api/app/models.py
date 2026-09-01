@@ -73,6 +73,7 @@ class RunSummary(BaseModel):
     error_code: str | None = None
     error_message: str | None = None
     remote_source_id: str | None = None
+    created_by_email: str | None = None
     selected_day: date | None = None
     start_hour_utc: int | None = None
     end_hour_utc: int | None = None
