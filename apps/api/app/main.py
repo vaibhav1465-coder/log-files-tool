@@ -21,12 +21,14 @@ from .parser import preflight
 from .storage import ensure_capacity, finalize_upload, store_upload, upload_target
 from .security import SecurityMiddleware
 from .queue import enqueue_job
+from .remote_api import router as remote_router
 from redis import Redis
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.1.0")
 app.add_middleware(SecurityMiddleware)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.accepted_hosts)
+app.include_router(remote_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
