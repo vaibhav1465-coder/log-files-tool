@@ -1,84 +1,62 @@
-# Express Intelligence OS
+# Express Intelligence OS — Financial Express pilot
 
-Evidence-first log analysis for Financial Express and other approved Express publications.
+A private, evidence-first log analysis tool for a small Financial Express operations team.
 
-## Milestone 1
+## Pilot architecture
 
-This repository currently provides:
+- The application runs on one ARM64 EC2 host with a 100 GB encrypted EBS volume.
+- Users connect through the company VPN and open the internal application.
+- Users choose an approved Financial Express source, UTC date, and hour range.
+- The backend uses the EC2 instance role; no AWS access keys are accepted or stored.
+- Source gzip objects are streamed from S3 and are not retained on disk.
+- PostgreSQL stores run metadata and aggregated evidence. Redis coordinates one worker.
+- Source buckets are treated as read-only. The application contains no S3 write or delete operation.
 
-- a Vercel-ready Next.js frontend shell;
-- a Dockerized FastAPI control plane;
-- PostgreSQL for product metadata;
-- Redis for future background-job coordination;
-- streaming preflight parsers for the supplied CDN access logs and origin JSONL logs;
-- quality-gate calculations that never turn missing evidence into zero.
-- an interactive New Analysis preflight for `.log`, `.jsonl`, text, and safe ZIP inputs.
-- immutable analysis-run and source-file metadata in PostgreSQL;
-- a Redis-backed background worker for full streaming analysis;
-- disk-backed URL aggregation and reusable HTTP status aggregates;
-- an Analysis Library with live run phase, evidence state, and processed-row counts.
-- a run-results dashboard with Googlebot, recrawl, revisit, and HTTP response evidence;
-- filtered and paginated URL-level evidence;
-- streamed CSV exports with spreadsheet-formula injection protection.
-- GSC property configuration, 28-day performance sync, sitemap evidence, and quota-aware URL Inspection;
-- connector health, inspection cohorts, and auditable administrative actions.
+The public repository contains no bucket names, prefixes, account identifiers, credentials, VPN profiles, or server keys. Those values belong only in the server's private environment file.
 
-Production activation requirements are documented in `docs/PRODUCTION_RUNBOOK.md`.
+## User workflow
 
-## Deployment modes
+1. Connect to the company VPN.
+2. Open the internal application address supplied by the administrator.
+3. Sign in with the named pilot account.
+4. Choose Financial Express CloudFront or Akamai.
+5. Select a UTC date and hour range.
+6. Check the file count and size.
+7. Start one analysis and monitor it in the Analysis Library.
+8. Review the evidence dashboard or export filtered CSV evidence.
 
-Local development remains bound to localhost. The production edition is a
-self-hosted team deployment with HTTPS, named gateway credentials, request and
-upload limits, durable Redis Stream jobs, persistent host-mounted storage,
-multiple workers, and daily PostgreSQL backups. Never publish the development
-Compose stack to the internet.
+Users do not upload files, use the AWS console, enter bucket paths, or run AWS commands.
 
-The production stack has no software licence charge, but 500 GB of private
-storage and daily analysis require company-provided server capacity. See
-`docs/SCALE_500GB_DEPLOYMENT.md` for hardware, security, deployment, recovery,
-and release gates.
+## Pilot limits
 
-## Large-file intake
+- Financial Express only.
+- Five to six named users.
+- One active processing run.
+- Up to 5,000 objects and 20 GB compressed source data per run.
+- At least 20 GB of local disk remains reserved.
+- Production browser uploads are disabled.
+- CloudFront and gzip parsing is covered by automated regression tests.
 
-- Exactly one source file is accepted per analysis run.
-- The local UI uses resumable chunks. Production admission is configurable up
-  to 500 decimal GB, with a 100 GB free-space reserve by default.
-- The browser uploads resumable 16 MiB chunks with offset reconciliation and three retry attempts.
-- The source is written directly to `D:\Log Files\data\source-files` through the Docker bind mount.
-- Preflight and full analysis reuse that same immutable source; there is no second upload or duplicate source copy.
-- Admission requires enough free space for the source plus a 10 GB safety reserve.
-- URL aggregation is disk-backed and its scratch database is created beside the source on `D:`.
-- Completed uploads receive a SHA-256 checksum before analysis is queued.
+## Development
 
-These controls reduce failure risk, but power loss, physical disk failure, corrupt input, or insufficient PostgreSQL capacity can still interrupt a run. Keep the machine awake and Docker Desktop running during large analyses.
-
-Large production uploads will use direct multipart transfer to an India-region object store. Docker packages the services, but it does not replace persistent production storage, backups, or regional compute.
-
-## Run locally
-
-Copy `.env.example` to `.env`, then run:
+The development stack remains Docker Compose based:
 
 ```powershell
 docker compose up --build
 ```
 
-Open the frontend at `http://localhost:3001`. Port 3001 is used by default to avoid conflicting with other local applications. The API health endpoint is `http://localhost:8000/api/v1/health`.
-
-The development preflight sends selected files to the local API and inspects at most 10,000 rows per file. This is intentionally separate from the production upload design: large production files will transfer directly to regional object storage through resumable multipart uploads.
-
-After a preflight passes, **Start full analysis** stores an immutable development source file, creates a queued run, and hands it to the worker. The worker persists URL/status evidence and continues independently of the browser.
-
-Run parser tests locally with the bundled or system Python:
+Run API tests:
 
 ```powershell
 python -m unittest discover -s apps/api/tests
 ```
 
-## Delivery sequence
+Build the web application:
 
-1. Parser preflight and evidence gates
-2. Resumable direct uploads and immutable source-file inventory
-3. Asynchronous analysis workers and stored aggregates
-4. Analysis Library, status evidence, and CSV exports
-5. GSC connection and quota-aware URL inspection
-6. Admin, auditing, security hardening, and production rollout
+```powershell
+Set-Location apps/web
+pnpm install --frozen-lockfile
+pnpm run build
+```
+
+Private server preparation and verification are documented in `docs/PRIVATE_EC2_PILOT.md`.
