@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     remote_max_scanned_keys: int = 1_000_000
     remote_max_active_runs: int = 1
     allow_local_uploads: bool = True
+    session_hours: int = 12
+    session_cookie_secure: bool = False
     max_file_bytes: int = 500_000_000_000
     storage_reserve_bytes: int = 100_000_000_000
     max_active_uploads: int = 2
