@@ -2,7 +2,8 @@
     admin off
 }
 
-http://{$APP_BIND:0.0.0.0:8080} {
+http://:8080 {
+    bind 0.0.0.0
     encode zstd gzip
 
     basic_auth {
