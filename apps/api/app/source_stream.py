@@ -12,7 +12,8 @@ from .remote_sources import configured_sources
 
 def _approved_s3_path(settings: Any, bucket: str, key: str) -> bool:
     return any(
-        source.bucket == bucket and key.startswith(source.prefix)
+        source.bucket == bucket
+        and (key == source.prefix.rstrip("/") or key.startswith(source.prefix.rstrip("/") + "/"))
         for source in configured_sources(settings).values()
     )
 
