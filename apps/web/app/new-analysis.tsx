@@ -1,63 +1,55 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useState } from "react";
-import { estimateAnalysis, formatDuration } from "./analysis-estimate";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
-type SourceType = "cdn" | "origin";
-type UploadSession = { run_id:string; file_id:string; filename:string; expected_size:number; upload_offset:number; status:string; analysis_limit_bytes?:number; eta_low_seconds?:number; eta_likely_seconds?:number; eta_high_seconds?:number };
-const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-const CHUNK_SIZE = 16 * 1024 * 1024;
-const MAX_FILE_SIZE = 500_000_000_000;
+type RemoteSource = { id: string; label: string; provider: string; timezone: string };
+type Estimate = { source_id:string; day:string; start_hour_utc:number; end_hour_utc:number; file_count:number; total_bytes:number; estimated_transfer_cost_usd:number; files:Array<{filename:string;size_bytes:number;last_modified?:string}> };
+type QueuedRun = { id:string; status:string; file_count:number; total_bytes:number; eta_likely_seconds?:number; estimated_transfer_cost_usd:number };
+const apiUrl = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/$/, "");
 
 function formatBytes(bytes:number){if(!bytes)return"0 B";const units=["B","KB","MB","GB"];const index=Math.min(Math.floor(Math.log(bytes)/Math.log(1024)),units.length-1);return `${(bytes/1024**index).toFixed(index?1:0)} ${units[index]}`;}
-
-async function requestJson(url:string,init?:RequestInit){const response=await fetch(url,init);if(!response.ok){let detail=`Request failed (${response.status})`;try{const body=await response.json();detail=typeof body.detail==="string"?body.detail:JSON.stringify(body.detail);}catch{}throw new Error(detail);}return response.json();}
+function formatDuration(seconds?:number){if(!seconds)return"Pending first measurement";if(seconds<60)return`${seconds}s`;if(seconds<3600)return`${Math.ceil(seconds/60)} min`;return`${(seconds/3600).toFixed(1)} hr`;}
+async function requestJson(path:string,init?:RequestInit){const response=await fetch(`${apiUrl}${path}`,{cache:"no-store",...init});if(!response.ok){let detail=`Request failed (${response.status})`;try{const body=await response.json();detail=typeof body.detail==="string"?body.detail:JSON.stringify(body.detail);}catch{}throw new Error(detail);}return response.json();}
 
 export default function NewAnalysis(){
-  const [publication,setPublication]=useState("Financial Express");
-  const [sourceType,setSourceType]=useState<SourceType>("cdn");
-  const [file,setFile]=useState<File|null>(null);
-  const [progress,setProgress]=useState(0);
-  const [phase,setPhase]=useState("Ready");
-  const [error,setError]=useState<string|null>(null);
+  const yesterday=useMemo(()=>new Date(Date.now()-86400000).toISOString().slice(0,10),[]);
+  const [sources,setSources]=useState<RemoteSource[]>([]);
+  const [sourceId,setSourceId]=useState("");
+  const [day,setDay]=useState(yesterday);
+  const [startHour,setStartHour]=useState(0);
+  const [endHour,setEndHour]=useState(1);
+  const [estimate,setEstimate]=useState<Estimate|null>(null);
+  const [run,setRun]=useState<QueuedRun|null>(null);
   const [busy,setBusy]=useState(false);
-  const [runId,setRunId]=useState<string|null>(null);
-  const [activeUpload,setActiveUpload]=useState<UploadSession|null>(null);
-  const [scope,setScope]=useState<"10"|"25"|"50"|"100"|"custom">("100");
-  const [customGb,setCustomGb]=useState("1");
-  const requestedBytes=file?Math.min(file.size,scope==="custom"?Math.max(1024*1024,Number(customGb||0)*1024**3):file.size*Number(scope)/100):0;
-  const estimate=file?estimateAnalysis(sourceType,file.size,requestedBytes):null;
+  const [error,setError]=useState<string|null>(null);
 
-  async function refreshActive(){try{setActiveUpload(await requestJson(`${apiUrl}/api/v1/active-upload`) as UploadSession|null);}catch{setActiveUpload(null);}}
-  useEffect(()=>{refreshActive();},[]);
+  useEffect(()=>{void requestJson("/api/v1/remote-sources").then((items:RemoteSource[])=>{setSources(items);setSourceId(items[0]?.id??"");}).catch(cause=>setError(cause instanceof Error?cause.message:"Sources unavailable"));},[]);
 
-  async function cancelActive(){if(!activeUpload)return;setBusy(true);setError(null);try{const response=await fetch(`${apiUrl}/api/v1/uploads/${activeUpload.run_id}`,{method:"DELETE"});if(!response.ok)throw new Error("Active upload could not be cancelled");setActiveUpload(null);setPhase("Ready");}catch(cause){setError(cause instanceof Error?cause.message:"Cancellation failed");}finally{setBusy(false);}}
+  const payload={source_id:sourceId,day,start_hour_utc:startHour,end_hour_utc:endHour};
+  async function checkSelection(){setBusy(true);setError(null);setEstimate(null);setRun(null);try{setEstimate(await requestJson("/api/v1/remote-runs/estimate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}));}catch(cause){setError(cause instanceof Error?cause.message:"Could not check this period");}finally{setBusy(false);}}
+  async function submit(event:FormEvent){event.preventDefault();if(!estimate||busy)return;setBusy(true);setError(null);try{const queued=await requestJson("/api/v1/remote-runs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}) as QueuedRun;setRun(queued);setEstimate(null);window.dispatchEvent(new CustomEvent("analysis-run-created"));}catch(cause){setError(cause instanceof Error?cause.message:"Analysis could not start");}finally{setBusy(false);}}
 
-  function selectFile(event:ChangeEvent<HTMLInputElement>){const selected=event.target.files?.[0]??null;setError(null);setRunId(null);setProgress(0);if(selected&&selected.size>MAX_FILE_SIZE){setFile(null);setError("The maximum supported file size is 500 GB.");event.target.value="";return;}setFile(selected);}
-
-  async function uploadChunk(session:UploadSession,blob:Blob,offset:number){let lastError:unknown;for(let attempt=1;attempt<=3;attempt++){try{return await requestJson(`${apiUrl}/api/v1/uploads/${session.run_id}/chunk`,{method:"PUT",headers:{"Upload-Offset":String(offset),"Content-Type":"application/octet-stream"},body:blob});}catch(cause){lastError=cause;try{const current=await requestJson(`${apiUrl}/api/v1/uploads/${session.run_id}`) as UploadSession;if(current.upload_offset>offset)return current;}catch{}if(attempt<3)await new Promise(resolve=>setTimeout(resolve,attempt*1000));}}throw lastError;}
-
-  async function submit(event:FormEvent){event.preventDefault();if(!file||busy)return;setBusy(true);setError(null);setProgress(0);try{
-    setPhase("Creating upload session");
-    let session=await requestJson(`${apiUrl}/api/v1/uploads`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({publication,source_type:sourceType,filename:file.name,size_bytes:file.size,analysis_limit_bytes:Math.round(requestedBytes)})}) as UploadSession;
-    setRunId(session.run_id);
-    while(session.upload_offset<file.size){const start=session.upload_offset;const end=Math.min(start+CHUNK_SIZE,file.size);setPhase(`Uploading ${formatBytes(start)} of ${formatBytes(file.size)}`);session=await uploadChunk(session,file.slice(start,end),start) as UploadSession;setProgress(session.upload_offset/file.size*100);}
-    setPhase("Verifying checksum and sample mapping");
-    await requestJson(`${apiUrl}/api/v1/uploads/${session.run_id}/complete`,{method:"POST"});
-    setPhase("Queued for full analysis");setProgress(100);setActiveUpload(null);window.dispatchEvent(new CustomEvent("analysis-run-created"));
-  }catch(cause){setError(cause instanceof Error?cause.message:"Upload failed");setPhase("Upload stopped");}finally{setBusy(false);}}
-
-  return <section className="analysisPanel" id="new-analysis"><div className="sectionHeading"><div><p className="eyebrow">NEW ANALYSIS · RESUMABLE INTAKE</p><h2>Upload one evidence file</h2></div><span className="devBadge">Up to 500 GB</span></div>
+  return <section className="analysisPanel" id="new-analysis">
+    <div className="sectionHeading"><div><p className="eyebrow">FINANCIAL EXPRESS · PRIVATE AWS LOGS</p><h2>Start a log analysis</h2></div><span className="devBadge">VPN only</span></div>
     <form onSubmit={submit}>
-      {activeUpload&&<div className="activeUpload"><div><strong>One upload is already active</strong><span>{activeUpload.filename} · {formatBytes(activeUpload.upload_offset)} of {formatBytes(activeUpload.expected_size)}</span></div><button type="button" onClick={cancelActive} disabled={busy}>Cancel active upload</button></div>}
-      <fieldset><legend>1. Select publication</legend><select className="publicationSelect" value={publication} onChange={event=>setPublication(event.target.value)} disabled={busy}><option>Financial Express</option><option>Indian Express</option><option>Jansatta</option><option>Loksatta</option></select></fieldset>
-      <fieldset><legend>2. Choose evidence source</legend><div className="sourceChoices">{(["cdn","origin"] as SourceType[]).map(source=><label className={sourceType===source?"selected":""} key={source}><input type="radio" checked={sourceType===source} onChange={()=>setSourceType(source)} disabled={busy}/><strong>{source==="cdn"?"CDN logs":"Origin logs"}</strong><span>{source==="cdn"?"Apache-style access records":"Newline-delimited JSON records"}</span></label>)}</div></fieldset>
-      <fieldset><legend>3. Select one file</legend><label className="dropZone"><input type="file" accept=".zip,.log,.json,.jsonl,.txt" onChange={selectFile} disabled={busy}/><strong>{file?file.name:"Choose one log file or ZIP archive"}</strong><span>{file?`${formatBytes(file.size)} · stored directly on D:`:"One file per analysis run; maximum 500 GB"}</span></label></fieldset>
-      {file&&<fieldset><legend>4. Choose how much to analyze</legend><div className="scopeChoices">{(["10","25","50","100"] as const).map(value=><button type="button" className={scope===value?"selected":""} key={value} onClick={()=>setScope(value)} disabled={busy}>{value}%</button>)}<button type="button" className={scope==="custom"?"selected":""} onClick={()=>setScope("custom")} disabled={busy}>Custom</button></div>{scope==="custom"&&<label className="customScope"><span>Data to analyze (GB)</span><input type="number" min="0.001" max={file.size/1024**3} step="0.1" value={customGb} onChange={event=>setCustomGb(event.target.value)} disabled={busy}/></label>}<div className="estimateCard"><strong>{formatBytes(estimate?.analysisBytes??0)} selected</strong><span>{Math.round((estimate?.fraction??0)*100)}% of this source</span><p>Estimated processing time: <b>{formatDuration(estimate?.lowSeconds??0)}</b> low · <b>{formatDuration(estimate?.likelySeconds??0)}</b> likely · <b>{formatDuration(estimate?.highSeconds??0)}</b> high</p><small>Estimate varies with compression, URL cardinality, disk speed and system load.</small></div></fieldset>}
-      {(busy||progress>0)&&<div className="uploadProgress"><div><span style={{width:`${progress}%`}}/></div><p><strong>{phase}</strong><span>{progress.toFixed(1)}%</span></p></div>}
-      {error&&<div className="resultBanner failed"><strong>Upload not completed</strong><span>{error}</span></div>}
-      {runId&&progress===100&&!error&&<div className="resultBanner passed"><strong>Analysis queued</strong><span>Run {runId.slice(0,8)} will continue if the browser is closed.</span></div>}
-      <div className="formActions"><p>The same stored file is used for preflight and full analysis. It is never uploaded twice.</p><button className="primaryButton" disabled={!file||busy||!!activeUpload}>{busy?"Uploading…":"Upload and analyze"}</button></div>
+      <fieldset><legend>1. Choose the log source</legend>
+        <select className="publicationSelect" value={sourceId} onChange={event=>{setSourceId(event.target.value);setEstimate(null);}} disabled={busy||!sources.length}>
+          {sources.map(source=><option key={source.id} value={source.id}>{source.label}</option>)}
+        </select>
+        {!sources.length&&!error?<p>Loading approved sources…</p>:null}
+      </fieldset>
+      <fieldset><legend>2. Choose date and UTC hours</legend>
+        <div className="scopeChoices">
+          <label><span>Date</span><input type="date" value={day} max={yesterday} onChange={event=>{setDay(event.target.value);setEstimate(null);}} disabled={busy}/></label>
+          <label><span>From</span><select value={startHour} onChange={event=>{const value=Number(event.target.value);setStartHour(value);setEndHour(Math.max(value+1,endHour));setEstimate(null);}} disabled={busy}>{Array.from({length:24},(_,hour)=><option key={hour} value={hour}>{String(hour).padStart(2,"0")}:00 UTC</option>)}</select></label>
+          <label><span>To</span><select value={endHour} onChange={event=>{setEndHour(Number(event.target.value));setEstimate(null);}} disabled={busy}>{Array.from({length:24-startHour},(_,index)=>startHour+index+1).map(hour=><option key={hour} value={hour}>{String(hour).padStart(2,"0")}:00 UTC</option>)}</select></label>
+        </div>
+        <small>UTC is used because both log sources are stored by UTC hour. IST is UTC +5:30.</small>
+      </fieldset>
+      {!estimate&&!run?<div className="formActions"><p>The tool checks file count and size before processing. Source buckets remain read-only.</p><button type="button" className="primaryButton" onClick={checkSelection} disabled={!sourceId||!day||busy}>{busy?"Checking…":"Check selected period"}</button></div>:null}
+      {estimate?<div className="estimateCard"><strong>{estimate.file_count} files · {formatBytes(estimate.total_bytes)} · est. ${estimate.estimated_transfer_cost_usd.toFixed(4)}</strong><span>Estimated transfer at $0.09/GB · Approved for one sequential analysis job</span><p>No files are copied permanently. Gzip content is streamed from AWS and temporary processing data is cleaned automatically.</p><button className="primaryButton" disabled={busy}>{busy?"Starting…":"Start analysis"}</button></div>:null}
+      {run?<div className="resultBanner passed"><strong>Analysis queued</strong><span>Run {run.id.slice(0,8)} · {sources.find(item=>item.id===sourceId)?.label??sourceId} · {day} · {String(startHour).padStart(2,"0")}:00–{String(endHour).padStart(2,"0")}:00 UTC · {run.file_count} files · expected time {formatDuration(run.eta_likely_seconds)}. You may close this page.</span></div>:null}
+      {error?<div className="resultBanner failed"><strong>Unable to continue safely</strong><span>{error}</span></div>:null}
     </form>
   </section>;
 }

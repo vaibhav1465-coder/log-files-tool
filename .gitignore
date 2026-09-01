@@ -17,3 +17,13 @@ data/
 deploy/secrets/*
 !deploy/secrets/.gitkeep
 *.dump
+
+# Private infrastructure and production evidence
+*.pem
+*.ovpn
+*.key
+*.gz
+*.eclf
+*.log
+deploy/private.env
+deploy/caddy-users

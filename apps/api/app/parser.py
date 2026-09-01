@@ -2,7 +2,7 @@ import json
 import re
 from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Iterable, Literal
 from urllib.parse import unquote
 
@@ -35,11 +35,20 @@ class ParseFailure(ValueError):
         self.reason = reason
 
 
+def _cloudfront_fields(line: str) -> list[str] | None:
+    fields = line.rstrip("\r\n").split("\t")
+    if len(fields) < 12 or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", fields[0]):
+        return None
+    if not re.fullmatch(r"\d{2}:\d{2}:\d{2}(?:\.\d+)?", fields[1]):
+        return None
+    return fields
+
+
 def detect_profile(line: str) -> Profile:
     stripped = line.lstrip()
     if stripped.startswith("{"):
         return "origin_jsonl"
-    if CDN_PATTERN.match(line.rstrip("\r\n")):
+    if CDN_PATTERN.match(line.rstrip("\r\n")) or _cloudfront_fields(line):
         return "cdn_access"
     return "unknown"
 
@@ -73,12 +82,33 @@ def _timestamp(value: object) -> datetime:
         return datetime.strptime(value, TIMESTAMP_FORMAT)
     except ValueError:
         try:
-            return datetime.fromisoformat(value)
+            result = datetime.fromisoformat(value)
+            return result if result.tzinfo else result.replace(tzinfo=timezone.utc)
         except ValueError as exc:
             raise ParseFailure("TIMESTAMP_INVALID") from exc
 
 
+def _parse_cloudfront(fields: list[str]) -> ParsedRow:
+    path = unquote(fields[7])
+    query = fields[11]
+    if query not in {"", "-"}:
+        path = f"{path}?{query}"
+    if not path:
+        raise ParseFailure("PATH_MISSING")
+    return ParsedRow(
+        timestamp=_timestamp(f"{fields[0]}T{fields[1]}+00:00"),
+        method=fields[5],
+        path=path,
+        status=_status(fields[8]),
+        response_bytes=_bytes(fields[3]),
+        user_agent=unquote(fields[10]),
+    )
+
+
 def parse_cdn(line: str) -> ParsedRow:
+    cloudfront = _cloudfront_fields(line)
+    if cloudfront:
+        return _parse_cloudfront(cloudfront)
     match = CDN_PATTERN.match(line.rstrip("\r\n"))
     if not match:
         raise ParseFailure("FIELD_COUNT_MISMATCH")
@@ -125,10 +155,11 @@ def preflight(lines: Iterable[str], limit: int = 10_000, minimum_acceptance_rate
     profile: Profile = "unknown"
 
     for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
         if processed >= limit:
             break
-        if not line.strip():
-            continue
         processed += 1
         if profile == "unknown":
             profile = detect_profile(line)

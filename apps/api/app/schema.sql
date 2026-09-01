@@ -69,7 +69,7 @@ ALTER TABLE source_files ADD COLUMN IF NOT EXISTS upload_offset BIGINT NOT NULL 
 ALTER TABLE source_files ADD COLUMN IF NOT EXISTS expected_size BIGINT;
 ALTER TABLE source_files ADD COLUMN IF NOT EXISTS upload_complete BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE source_files ADD COLUMN IF NOT EXISTS upload_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
-CREATE UNIQUE INDEX IF NOT EXISTS one_source_file_per_run ON source_files(run_id);
+DROP INDEX IF EXISTS one_source_file_per_run;
 
 CREATE TABLE IF NOT EXISTS gsc_properties (
     id UUID PRIMARY KEY,
@@ -150,3 +150,50 @@ ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS eta_likely_seconds INTEGER;
 ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS eta_high_seconds INTEGER;
 ALTER TABLE analysis_runs DROP CONSTRAINT IF EXISTS analysis_limit_positive;
 ALTER TABLE analysis_runs ADD CONSTRAINT analysis_limit_positive CHECK (analysis_limit_bytes IS NULL OR analysis_limit_bytes > 0);
+
+CREATE TABLE IF NOT EXISTS app_users (
+    id UUID PRIMARY KEY,
+    email TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'analyst' CHECK (role IN ('analyst','admin')),
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_login_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS user_sessions (
+    id UUID PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES app_users(id),
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ,
+    user_agent_hash TEXT NOT NULL,
+    client_ip_hash TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_sessions_active ON user_sessions(user_id,expires_at DESC) WHERE revoked_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_audit_events_created ON audit_events(created_at DESC);
+
+
+ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS remote_source_id TEXT;
+ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS created_by_email TEXT;
+ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS selected_day DATE;
+ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS start_hour_utc SMALLINT;
+ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS end_hour_utc SMALLINT;
+ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS selected_bytes BIGINT;
+ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS estimated_transfer_cost_usd NUMERIC(12,6);
+ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMPTZ;
+ALTER TABLE analysis_runs ADD COLUMN IF NOT EXISTS cancelled_by TEXT;
+ALTER TABLE app_users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT TRUE;
+
+ALTER TABLE analysis_runs DROP CONSTRAINT IF EXISTS analysis_runs_status_check;
+ALTER TABLE analysis_runs ADD CONSTRAINT analysis_runs_status_check CHECK (status IN ('uploading','verifying','queued','processing','aggregating','cancelling','completed','failed','cancelled'));
+ALTER TABLE analysis_runs DROP CONSTRAINT IF EXISTS analysis_runs_remote_hours_check;
+ALTER TABLE analysis_runs ADD CONSTRAINT analysis_runs_remote_hours_check CHECK (
+    (start_hour_utc IS NULL AND end_hour_utc IS NULL)
+    OR (start_hour_utc >= 0 AND start_hour_utc < end_hour_utc AND end_hour_utc <= 24)
+);

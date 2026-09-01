@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import StreamingResponse
 
+from .auth import require_admin, router as auth_router
 from .config import get_settings
 from .intake import MAX_FILES_PER_BATCH, SAMPLE_LINES, IntakeFailure, iter_preflight_lines
 from .db import connection, initialize_database
@@ -21,12 +22,15 @@ from .parser import preflight
 from .storage import ensure_capacity, finalize_upload, store_upload, upload_target
 from .security import SecurityMiddleware
 from .queue import enqueue_job
+from .remote_api import router as remote_router
 from redis import Redis
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name, version="0.1.0")
 app.add_middleware(SecurityMiddleware)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.accepted_hosts)
+app.include_router(remote_router)
+app.include_router(auth_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins,
@@ -455,13 +459,15 @@ def gsc_dashboard(property_id: str) -> dict:
 
 
 @app.get("/api/v1/admin/audit")
-def list_audit_events(limit: int = 100) -> list[dict]:
+def list_audit_events(request: Request, limit: int = 100) -> list[dict]:
+    require_admin(request)
     with connection() as conn:
         return conn.execute("SELECT actor,action,target_type,target_id,result,detail,created_at FROM audit_events ORDER BY created_at DESC LIMIT %s", (min(max(limit,1),500),)).fetchall()
 
 
 @app.get("/api/v1/admin/capacity")
-def capacity_status() -> dict:
+def capacity_status(request: Request) -> dict:
+    require_admin(request)
     disk = shutil.disk_usage(settings.storage_root)
     redis = Redis.from_url(settings.redis_url, decode_responses=True)
     try:

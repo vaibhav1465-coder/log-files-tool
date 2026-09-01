@@ -13,12 +13,17 @@ from .intake import iter_analysis_lines
 from .processing import aggregate_lines
 from .gsc import GscClient
 from .queue import GROUP, STREAM
+from .source_stream import open_source_stream
+
+
+class RunCancelled(Exception):
+    pass
 
 
 def update_run(run_id: str, **values) -> None:
     assignments = ", ".join(f"{key}=%({key})s" for key in values)
     with connection() as conn:
-        conn.execute(f"UPDATE analysis_runs SET {assignments} WHERE id=%(run_id)s", {**values, "run_id": run_id})
+        conn.execute(f"UPDATE analysis_runs SET {assignments} WHERE id=%(run_id)s AND status NOT IN ('cancelling','cancelled')", {**values, "run_id": run_id})
 
 
 def process_run(run_id: str, heartbeat=lambda: None) -> None:
@@ -26,6 +31,9 @@ def process_run(run_id: str, heartbeat=lambda: None) -> None:
     with connection() as conn:
         run = conn.execute("SELECT status,analysis_limit_bytes FROM analysis_runs WHERE id=%s FOR UPDATE", (run_id,)).fetchone()
         if not run or run["status"] in {"completed", "cancelled"}:
+            return
+        if run["status"] == "cancelling":
+            conn.execute("UPDATE analysis_runs SET status='cancelled',phase='cancelled',completed_at=NOW(),cancelled_at=COALESCE(cancelled_at,NOW()) WHERE id=%s", (run_id,))
             return
         files = conn.execute("SELECT * FROM source_files WHERE run_id=%s AND upload_complete ORDER BY created_at", (run_id,)).fetchall()
         if not files:
@@ -37,9 +45,13 @@ def process_run(run_id: str, heartbeat=lambda: None) -> None:
     total_processed = total_accepted = total_rejected = 0
     all_status: dict[int, dict] = {}
     try:
-        scratch_root = Path(files[0]["stored_path"]).parent
+        scratch_root = Path(settings.storage_root)
 
         def guard_resources() -> None:
+            with connection() as conn:
+                current = conn.execute("SELECT status FROM analysis_runs WHERE id=%s", (run_id,)).fetchone()
+            if not current or current["status"] in {"cancelling", "cancelled"}:
+                raise RunCancelled("Analysis cancellation requested")
             free = shutil.disk_usage(scratch_root).free
             if free < settings.storage_reserve_bytes:
                 raise OSError(f"Processing stopped safely: {free} bytes free is below the {settings.storage_reserve_bytes} byte reserve")
@@ -56,8 +68,10 @@ def process_run(run_id: str, heartbeat=lambda: None) -> None:
                     )
 
         for source in files:
-            with Path(source["stored_path"]).open("rb") as stream:
-                lines, _ = iter_analysis_lines(stream, source["original_name"], max_bytes=run["analysis_limit_bytes"], source_size_bytes=source["size_bytes"])
+            guard_resources()
+            with open_source_stream(settings, source["stored_path"]) as stream:
+                byte_limit = None if source["stored_path"].startswith("s3://") else run["analysis_limit_bytes"]
+                lines, _ = iter_analysis_lines(stream, source["original_name"], max_bytes=byte_limit, source_size_bytes=source["size_bytes"])
                 def progress(count: int) -> None:
                     update_run(run_id, processed_lines=total_processed + count)
                 summary = aggregate_lines(
@@ -74,9 +88,14 @@ def process_run(run_id: str, heartbeat=lambda: None) -> None:
         with connection() as conn:
             conn.execute("DELETE FROM status_aggregates WHERE run_id=%s", (run_id,))
             conn.execute("INSERT INTO status_aggregates (run_id,status_code,request_count,unique_url_count,response_bytes) SELECT run_id,status_code,SUM(request_count),COUNT(*),SUM(response_bytes) FROM url_aggregates WHERE run_id=%s GROUP BY run_id,status_code", (run_id,))
-            conn.execute("UPDATE analysis_runs SET status='completed', phase='completed', progress_percent=100, evidence_state=CASE WHEN processed_lines > 0 AND accepted_lines::numeric/processed_lines >= 0.95 THEN 'passed' ELSE 'partial' END, completed_at=NOW() WHERE id=%s", (run_id,))
+            conn.execute("UPDATE analysis_runs SET status='completed', phase='completed', progress_percent=100, evidence_state=CASE WHEN processed_lines > 0 AND accepted_lines::numeric/processed_lines >= 0.95 THEN 'passed' ELSE 'partial' END, completed_at=NOW() WHERE id=%s AND status NOT IN ('cancelling','cancelled')", (run_id,))
+    except RunCancelled:
+        with connection() as conn:
+            conn.execute("UPDATE analysis_runs SET status='cancelled',phase='cancelled',completed_at=NOW(),cancelled_at=COALESCE(cancelled_at,NOW()) WHERE id=%s", (run_id,))
     except Exception as exc:
-        update_run(run_id, status="failed", phase="failed", error_code=type(exc).__name__, error_message=str(exc)[:1000])
+        remote = any(item["stored_path"].startswith("s3://") for item in files)
+        message = "Remote source processing failed safely" if remote else str(exc)[:1000]
+        update_run(run_id, status="failed", phase="failed", error_code=type(exc).__name__, error_message=message)
 
 
 def sync_gsc_property(property_id: str) -> None:

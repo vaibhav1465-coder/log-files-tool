@@ -61,7 +61,8 @@ def aggregate_lines(
     conn.execute("CREATE TABLE urls (url TEXT, status INTEGER, requests INTEGER, first_seen TEXT, last_seen TEXT, bytes INTEGER, googlebot INTEGER, googlebot_first TEXT, googlebot_last TEXT, PRIMARY KEY(url,status))")
     try:
         for line in lines:
-            if not line.strip():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
                 continue
             processed += 1
             if profile == "unknown":
