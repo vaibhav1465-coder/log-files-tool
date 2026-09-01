@@ -72,6 +72,22 @@ class RemoteSourceTests(unittest.TestCase):
         self.assertEqual(len(objects), 1)
         self.assertIn("0200-0300", objects[0].key)
 
+    def test_cloudfront_scan_limit_fails_closed_during_listing(self):
+        source = SourceDefinition("financial-express-cloudfront", "FE CF", "CloudFront", "bucket", "approved/cf")
+        base = "approved/cf/2026/08/30/05/"
+        s3 = FakeS3({base: [{"Contents": [item(base + "a.gz"), item(base + "b.gz")]}]})
+        with self.assertRaises(RemoteSourceError):
+            discover_objects(
+                s3,
+                source,
+                date(2026, 8, 30),
+                5,
+                6,
+                max_objects=10,
+                max_total_bytes=100,
+                max_scanned_keys=1,
+            )
+
     def test_object_and_byte_limits_fail_closed(self):
         source = SourceDefinition("financial-express-cloudfront", "FE CF", "CloudFront", "bucket", "approved/cf")
         base = "approved/cf/2026/08/30/05/"
