@@ -1,9 +1,8 @@
 {
-    email {$ACME_EMAIL}
     admin off
 }
 
-{$APP_DOMAIN} {
+http://{$APP_BIND:0.0.0.0:8080} {
     encode zstd gzip
 
     basic_auth {
@@ -11,11 +10,11 @@
     }
 
     header {
-        Strict-Transport-Security "max-age=31536000; includeSubDomains"
         X-Content-Type-Options "nosniff"
         X-Frame-Options "DENY"
         Referrer-Policy "no-referrer"
         Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        Cache-Control "no-store"
         -Server
     }
 
@@ -31,13 +30,13 @@
     }
 
     request_body {
-        max_size 70MB
+        max_size 1MB
     }
 
     log {
         output file /var/log/caddy/access.json {
-            roll_size 100MB
-            roll_keep 10
+            roll_size 25MB
+            roll_keep 4
         }
         format json
     }
