@@ -46,6 +46,15 @@ class SourceStreamTests(unittest.TestCase):
                 pass
         self.assertEqual(client.calls, [])
 
+    def test_prefix_collision_is_rejected_when_configuration_has_no_trailing_slash(self):
+        settings = self.settings()
+        settings.fe_cloudfront_prefix = "approved/cf"
+        client = FakeS3()
+        with self.assertRaises(PermissionError):
+            with open_source_stream(settings, "s3://approved-bucket/approved/cf-secret/file.gz", client):
+                pass
+        self.assertEqual(client.calls, [])
+
     def test_prefix_escape_is_rejected(self):
         client = FakeS3()
         with self.assertRaises(PermissionError):
