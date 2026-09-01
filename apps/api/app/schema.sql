@@ -69,7 +69,7 @@ ALTER TABLE source_files ADD COLUMN IF NOT EXISTS upload_offset BIGINT NOT NULL 
 ALTER TABLE source_files ADD COLUMN IF NOT EXISTS expected_size BIGINT;
 ALTER TABLE source_files ADD COLUMN IF NOT EXISTS upload_complete BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE source_files ADD COLUMN IF NOT EXISTS upload_updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
-CREATE UNIQUE INDEX IF NOT EXISTS one_source_file_per_run ON source_files(run_id);
+DROP INDEX IF EXISTS one_source_file_per_run;
 
 CREATE TABLE IF NOT EXISTS gsc_properties (
     id UUID PRIMARY KEY,
