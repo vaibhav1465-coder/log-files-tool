@@ -49,7 +49,7 @@ def _normalise_email(value: str) -> str:
 def hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
     derived = hashlib.scrypt(password.encode(), salt=salt, n=16384, r=8, p=1, dklen=32)
-    return f"scrypt$16384$8$1$${salt.hex()}$${derived.hex()}"
+    return "scrypt$16384$8$1$" + salt.hex() + "$" + derived.hex()
 
 
 def verify_password(password: str, encoded: str) -> bool:
