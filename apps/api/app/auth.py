@@ -129,7 +129,7 @@ def login(payload: LoginRequest, request: Request, response: Response) -> dict:
     return {"user": _public_user(user), "expires_at": expires_at}
 
 
-@router.post("/auth/logout", status_code=204)
+@router.post("/auth/logout")
 def logout(request: Request, response: Response) -> None:
     user = current_user(request)
     token = request.cookies.get(SESSION_COOKIE)
@@ -137,6 +137,7 @@ def logout(request: Request, response: Response) -> None:
         conn.execute("UPDATE user_sessions SET revoked_at=NOW() WHERE token_hash=%s", (_token_hash(token or ""),))
         _audit(conn, user["email"], "auth.logout", "session", str(user["session_id"]), "success")
     response.delete_cookie(SESSION_COOKIE, path="/")
+    return {"status": "signed_out"}
 
 
 @router.get("/auth/me")
@@ -144,7 +145,7 @@ def me(request: Request) -> dict:
     return {"user": _public_user(current_user(request))}
 
 
-@router.post("/auth/change-password", status_code=204)
+@router.post("/auth/change-password")
 def change_password(payload: PasswordChange, request: Request) -> None:
     user = current_user(request)
     with connection() as conn:
@@ -154,6 +155,7 @@ def change_password(payload: PasswordChange, request: Request) -> None:
         conn.execute("UPDATE app_users SET password_hash=%s,updated_at=NOW() WHERE id=%s", (hash_password(payload.new_password), user["id"]))
         conn.execute("UPDATE user_sessions SET revoked_at=NOW() WHERE user_id=%s AND id<>%s", (user["id"], user["session_id"]))
         _audit(conn, user["email"], "auth.password_change", "user", str(user["id"]), "success")
+    return {"status": "password_changed"}
 
 
 @router.get("/admin/users")
